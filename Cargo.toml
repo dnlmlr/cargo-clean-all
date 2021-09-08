@@ -1,0 +1,9 @@
+[package]
+name = "cargo-clean-all"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+chrono = "0.4.19"
+bytefmt = "0.1.7"
+pico-args = "0.4.2"
