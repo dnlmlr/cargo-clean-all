@@ -1,9 +1,10 @@
 use crossbeam_channel::Sender;
-use std::ffi::OsStr;
-use std::fs;
-use std::io::{stdin, stdout, Write};
-use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::{
+    fs,
+    io::{stdin, stdout, Write},
+    path::{Path, PathBuf},
+    time::SystemTime,
+};
 
 const HELP_TEXT: &str = r#"
 Recursively clean all rust project target directories under a given directory.
@@ -37,10 +38,6 @@ struct AppArgs {
     dry_run: bool,
     number_of_threads: usize,
 }
-
-struct Job(PathBuf, Sender<Job>);
-
-struct ProjectDir(PathBuf, bool);
 
 fn parse_args() -> Result<AppArgs, pico_args::Error> {
     let mut pargs = pico_args::Arguments::from_env();
@@ -79,45 +76,37 @@ fn main() {
 
     let scan_path = Path::new(&args.root_dir);
 
-    let (mut projects, mut ignored): (Vec<_>, Vec<_>) =
-        find_cargo_projects(scan_path, args.number_of_threads)
-            .into_iter()
-            .filter_map(|it| it.1.then(|| ProjectTargetAnalysis::analyze(&it.0)))
-            .partition(|it| {
-                let secs_elapsed = it
-                    .last_modified
-                    .elapsed()
-                    .map_err(|_| {
-                        eprintln!(
-                            "Timestamp calculation failed: {}",
-                            it.project_path.display()
-                        )
-                    })
-                    .unwrap_or_default()
-                    .as_secs_f32();
+    // Find project dirs
+    let project_dirs = find_cargo_projects(scan_path, args.number_of_threads);
 
-                let days_elapsed = secs_elapsed / (60.0 * 60.0 * 24.0);
-
-                days_elapsed >= args.keep_last_modified && it.size >= args.keep_size
-            });
+    // Analyse project dirs and find out which of them are supposed to be cleaned
+    let (mut projects, mut ignored): (Vec<_>, Vec<_>) = project_dirs
+        .into_iter()
+        .filter_map(|it| it.1.then(|| ProjectTargetAnalysis::analyze(&it.0)))
+        .partition(|tgt| {
+            let secs_elapsed = tgt
+                .last_modified
+                .elapsed()
+                .unwrap_or_default()
+                .as_secs_f32();
+            let days_elapsed = secs_elapsed / (60.0 * 60.0 * 24.0);
+            days_elapsed >= args.keep_last_modified && tgt.size > args.keep_size
+        });
 
     projects.sort_by_key(|it| it.size);
-
     ignored.sort_by_key(|it| it.size);
 
     let total_size: u64 = projects.iter().map(|it| it.size).sum();
 
     println!("Ignoring the following project directories:");
-
-    for p in &ignored {
-        p.print_listformat();
-    }
+    ignored
+        .iter()
+        .for_each(ProjectTargetAnalysis::print_listformat);
 
     println!("\nSelected the following project directories for cleaning:");
-
-    for p in &projects {
-        p.print_listformat();
-    }
+    projects
+        .iter()
+        .for_each(ProjectTargetAnalysis::print_listformat);
 
     println!(
         "\nSelected {}/{} projects, total freeable size: {}",
@@ -131,6 +120,7 @@ fn main() {
         return;
     }
 
+    // Confirm cleanup if --yes is not present in the args
     if !args.yes {
         let mut inp = String::new();
         print!("Clean the project directories shown above? (yes/no): ");
@@ -152,23 +142,31 @@ fn main() {
     println!("Done!");
 }
 
+/// Job for the threaded project finder. First the path to be searched, second the sender to create
+/// new jobs for recursively searching the dirs
+struct Job(PathBuf, Sender<Job>);
+
+/// Directory of the project and bool that is true if the target directory exists
+struct ProjectDir(PathBuf, bool);
+
+/// Recursively scan the given path for cargo projects using the specified number of threads.
+///
+/// Panics when the number of threads is 0.
 fn find_cargo_projects(path: &Path, num_threads: usize) -> Vec<ProjectDir> {
     assert!(num_threads > 0);
 
-    let result_receiver = {
+    {
         let (job_sender, job_receiver) = crossbeam_channel::unbounded::<Job>();
         let (result_sender, result_receiver) = crossbeam_channel::unbounded::<ProjectDir>();
 
-        for _ in 0..num_threads {
-            let job_receiver = job_receiver.clone();
-            let result_sender = result_sender.clone();
-
-            std::thread::spawn(move || {
-                job_receiver.into_iter().for_each(|job| {
-                    find_cargo_projects_task(&job.0, job.1, result_sender.clone())
-                })
+        (0..num_threads)
+            .map(|_| (job_receiver.clone(), result_sender.clone()))
+            .for_each(|(jr, rs)| {
+                std::thread::spawn(move || {
+                    jr.into_iter()
+                        .for_each(|job| find_cargo_projects_task(&job.0, job.1, rs.clone()))
+                });
             });
-        }
 
         job_sender
             .clone()
@@ -176,14 +174,17 @@ fn find_cargo_projects(path: &Path, num_threads: usize) -> Vec<ProjectDir> {
             .unwrap();
 
         result_receiver
-    };
-
-    result_receiver.into_iter().collect()
+    }
+    .into_iter()
+    .collect()
 }
 
+/// Scan the given directory and report to the results Sender if the directory contains a
+/// Cargo.toml . Detected subdirectories should be queued as a new job in with the job_sender.
+///
+/// This function is supposed to be called by the threadpool in find_cargo_projects
 fn find_cargo_projects_task(path: &Path, job_sender: Sender<Job>, results: Sender<ProjectDir>) {
     let mut has_target = false;
-    let mut has_cargo_toml = false;
 
     let read_dir = match path.read_dir() {
         Ok(it) => it,
@@ -193,20 +194,30 @@ fn find_cargo_projects_task(path: &Path, job_sender: Sender<Job>, results: Sende
         }
     };
 
-    for it in read_dir.filter_map(|it| it.ok().map(|it| it.path())) {
-        if it.is_dir() {
-            if it.file_name() == Some(OsStr::new("target")) {
-                has_target = true;
-            } else if it.file_name() != Some(OsStr::new(".git")) {
-                job_sender
-                    .send(Job(it.to_path_buf(), job_sender.clone()))
-                    .unwrap();
-            }
-        } else if it.file_name() == Some(OsStr::new("Cargo.toml")) {
-            has_cargo_toml = true;
+    let (dirs, files): (Vec<_>, Vec<_>) = read_dir
+        .filter_map(|it| it.ok().map(|it| it.path()))
+        .partition(|it| it.is_dir());
+
+    let has_cargo_toml = files
+        .iter()
+        .find(|it| it.file_name().unwrap_or_default().to_string_lossy() == "Cargo.toml")
+        .is_some();
+
+    // Iterate through the subdirectories of path, ignoring entries that caused errors
+    for it in dirs {
+        let filename = it.file_name().unwrap_or_default().to_string_lossy();
+        match filename.as_ref() {
+            // No need to search .git directories for cargo projects
+            ".git" => (),
+            "target" if has_cargo_toml => has_target = true,
+            // For directories queue a new job to search it with the threadpool
+            _ => job_sender
+                .send(Job(it.to_path_buf(), job_sender.clone()))
+                .unwrap(),
         }
     }
 
+    // If path contains a Cargo.toml, it is a project directory
     if has_cargo_toml {
         results
             .send(ProjectDir(path.to_path_buf(), has_target))
@@ -235,32 +246,24 @@ impl ProjectTargetAnalysis {
     }
 
     // Recursively sum up the file sizes and find the last modified timestamp
-    fn recursive_scan_target(path: &Path) -> (u64, SystemTime) {
-        let mut size = 0;
-        let mut last_modified = SystemTime::UNIX_EPOCH;
+    fn recursive_scan_target<T: AsRef<Path>>(path: T) -> (u64, SystemTime) {
+        let path = path.as_ref();
 
-        path.read_dir()
-            .unwrap()
-            .filter_map(|it| it.ok().map(|it| it.path()))
-            .for_each(|entry| {
-                if entry.is_dir() {
-                    let dir_stats = Self::recursive_scan_target(&entry);
+        let default = (0, SystemTime::UNIX_EPOCH);
 
-                    size += dir_stats.0;
-                    if dir_stats.1 > last_modified {
-                        last_modified = dir_stats.1;
-                    }
-                } else if let Ok(md) = entry.metadata() {
-                    size += md.len();
-                    if let Ok(modified) = md.modified() {
-                        if modified > last_modified {
-                            last_modified = modified;
-                        }
-                    }
-                }
-            });
+        if !path.exists() {
+            return default;
+        }
 
-        (size, last_modified)
+        match (path.is_file(), path.metadata()) {
+            (true, Ok(md)) => return (md.len(), md.modified().unwrap_or(default.1)),
+            _ => path
+                .read_dir()
+                .unwrap()
+                .filter_map(|it| it.ok().map(|it| it.path()))
+                .map(Self::recursive_scan_target)
+                .fold(default, |a, b| (a.0 + b.0, a.1.max(b.1))),
+        }
     }
 
     fn print_listformat(&self) {
@@ -268,11 +271,10 @@ impl ProjectTargetAnalysis {
         let project_name = path.file_name().unwrap_or_default().to_string_lossy();
 
         let last_modified: chrono::DateTime<chrono::Local> = self.last_modified.into();
-
         println!(
             "  {} : {}\n      {}, {}",
             project_name,
-            self.project_path.display(),
+            path.display(),
             last_modified.format("%Y-%m-%d %H:%M"),
             bytefmt::format(self.size)
         )
