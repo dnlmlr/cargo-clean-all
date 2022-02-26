@@ -1,21 +1,24 @@
+use crossbeam_channel::Sender;
 use std::ffi::OsStr;
+use std::fs;
 use std::io::{stdin, stdout, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 const HELP_TEXT: &str = r#"
-Clean all rust project target directories under a given directory.
+Recursively clean all rust project target directories under a given directory.
 
 Usage:
     cargo clean-all [OPTIONS]
 
 Options:
     --help             Display this help text
-    --dir [DIR]        Clean [DIR] instead of working dir
+    --dir [DIR]        Clean [DIR] instead of the working dir
     --yes              Perform the cleaning without asking first
     --dry-run          Just list the cleanable projects, don't ask to actually perform cleaning
     --keep-size [SIZE] Keep target dirs with size below [SIZE]
     --keep-days [DAYS] Keep target dirs modified less than [DAYS] days ago
+    --threads [NUM]    The number of threads used. By default as many threads as cpu cores
 
 Examples:
     # Clean all projects in the current directory with a target-dir size of 500MB or more
@@ -30,9 +33,14 @@ struct AppArgs {
     root_dir: String,
     yes: bool,
     keep_size: u64,
-    keep_last_modified: u32,
+    keep_last_modified: f32,
     dry_run: bool,
+    number_of_threads: usize,
 }
+
+struct Job(PathBuf, Sender<Job>);
+
+struct ProjectDir(PathBuf, bool);
 
 fn parse_args() -> Result<AppArgs, pico_args::Error> {
     let mut pargs = pico_args::Arguments::from_env();
@@ -47,15 +55,14 @@ fn parse_args() -> Result<AppArgs, pico_args::Error> {
             .unwrap_or(".".to_string()),
         yes: pargs.contains("--yes"),
         keep_size: pargs
-            .opt_value_from_fn("--keep-size", parse_arg_opt_filesize)?
+            .opt_value_from_fn("--keep-size", |it| bytefmt::parse(it))?
             .unwrap_or(0),
-        keep_last_modified: pargs.opt_value_from_str("--keep-days")?.unwrap_or(0),
+        keep_last_modified: pargs.opt_value_from_str("--keep-days")?.unwrap_or(0_u16) as f32,
         dry_run: pargs.contains("--dry-run"),
+        number_of_threads: pargs
+            .opt_value_from_str("--threads")?
+            .unwrap_or(num_cpus::get()),
     })
-}
-
-fn parse_arg_opt_filesize(arg: &str) -> Result<u64, &'static str> {
-    bytefmt::parse(arg)
 }
 
 fn print_help_and_exit() {
@@ -72,27 +79,27 @@ fn main() {
 
     let scan_path = Path::new(&args.root_dir);
 
-    let (mut projects, mut ignored): (Vec<_>, Vec<_>) = find_cargo_projects(scan_path)
-        .into_iter()
-        .map(|it| ProjectTargetAnalysis::analyze(&it))
-        .partition(|it| {
-            let secs_elapsed = it
-                .last_modified
-                .elapsed()
-                .expect(&format!(
-                    "Timestamp calculation failed: {}",
-                    it.project_path.display()
-                ))
-                .as_secs_f32();
+    let (mut projects, mut ignored): (Vec<_>, Vec<_>) =
+        find_cargo_projects(scan_path, args.number_of_threads)
+            .into_iter()
+            .filter_map(|it| it.1.then(|| ProjectTargetAnalysis::analyze(&it.0)))
+            .partition(|it| {
+                let secs_elapsed = it
+                    .last_modified
+                    .elapsed()
+                    .map_err(|_| {
+                        eprintln!(
+                            "Timestamp calculation failed: {}",
+                            it.project_path.display()
+                        )
+                    })
+                    .unwrap_or_default()
+                    .as_secs_f32();
 
-            let days_elapsed = secs_elapsed / (60.0 * 60.0 * 24.0);
+                let days_elapsed = secs_elapsed / (60.0 * 60.0 * 24.0);
 
-            if days_elapsed < args.keep_last_modified as f32 || args.keep_size > it.size {
-                false
-            } else {
-                true
-            }
-        });
+                days_elapsed >= args.keep_last_modified && it.size >= args.keep_size
+            });
 
     projects.sort_by_key(|it| it.size);
 
@@ -138,25 +145,51 @@ fn main() {
 
     println!("Starting cleanup...");
 
-    for p in &projects {
-        std::fs::remove_dir_all(&p.project_path.join("target")).unwrap();
-    }
+    projects
+        .iter()
+        .for_each(|p| fs::remove_dir_all(&p.project_path.join("target")).unwrap());
 
     println!("Done!");
 }
 
-/// Detect rust project directories in the given parent path that have `target` directories in them.
-fn find_cargo_projects(path: &Path) -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
+fn find_cargo_projects(path: &Path, num_threads: usize) -> Vec<ProjectDir> {
+    assert!(num_threads > 0);
 
+    let result_receiver = {
+        let (job_sender, job_receiver) = crossbeam_channel::unbounded::<Job>();
+        let (result_sender, result_receiver) = crossbeam_channel::unbounded::<ProjectDir>();
+
+        for _ in 0..num_threads {
+            let job_receiver = job_receiver.clone();
+            let result_sender = result_sender.clone();
+
+            std::thread::spawn(move || {
+                job_receiver.into_iter().for_each(|job| {
+                    find_cargo_projects_task(&job.0, job.1, result_sender.clone())
+                })
+            });
+        }
+
+        job_sender
+            .clone()
+            .send(Job(path.to_path_buf(), job_sender))
+            .unwrap();
+
+        result_receiver
+    };
+
+    result_receiver.into_iter().collect()
+}
+
+fn find_cargo_projects_task(path: &Path, job_sender: Sender<Job>, results: Sender<ProjectDir>) {
     let mut has_target = false;
     let mut has_cargo_toml = false;
 
     let read_dir = match path.read_dir() {
-        Ok(read_dir) => read_dir,
+        Ok(it) => it,
         Err(e) => {
             eprintln!("Error reading directory: '{}'  {}", path.display(), e);
-            return dirs;
+            return;
         }
     };
 
@@ -165,20 +198,20 @@ fn find_cargo_projects(path: &Path) -> Vec<PathBuf> {
             if it.file_name() == Some(OsStr::new("target")) {
                 has_target = true;
             } else if it.file_name() != Some(OsStr::new(".git")) {
-                dirs.extend(find_cargo_projects(&it));
+                job_sender
+                    .send(Job(it.to_path_buf(), job_sender.clone()))
+                    .unwrap();
             }
-        } else {
-            if it.file_name() == Some(OsStr::new("Cargo.toml")) {
-                has_cargo_toml = true;
-            }
+        } else if it.file_name() == Some(OsStr::new("Cargo.toml")) {
+            has_cargo_toml = true;
         }
     }
 
-    if has_target && has_cargo_toml {
-        dirs.push(path.to_owned());
+    if has_cargo_toml {
+        results
+            .send(ProjectDir(path.to_path_buf(), has_target))
+            .unwrap();
     }
-
-    dirs
 }
 
 struct ProjectTargetAnalysis {

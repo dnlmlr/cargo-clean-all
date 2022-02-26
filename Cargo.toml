@@ -1,9 +1,19 @@
 [package]
 name = "cargo-clean-all"
 version = "0.1.0"
+authors = ["Daniel M <danielm-github@dnml.de>"]
+license = "MIT"
+repository = "https://github.com/dnlmlr/cargo-clean-all"
+homepage = "https://github.com/dnlmlr/cargo-clean-all"
+readme = "README.md"
+description = "Recursively clean all cargo projects in a given directory that match the specified criteria"
+categories = ["development-tools::cargo-plugins", "command-line-utilities"]
+keywords = ["cargo-plugins", "cargo-clean", "cargo", "clean"]
 edition = "2021"
 
 [dependencies]
 chrono = "0.4.19"
 bytefmt = "0.1.7"
 pico-args = "0.4.2"
+crossbeam-channel = "0.5.2"
+num_cpus = "1.13.1"
