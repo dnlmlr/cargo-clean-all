@@ -35,7 +35,7 @@ cargo clean-all
 
 Clean all target directories under the directory `[dir]`.
 ```
-cargo clean-all --dir [dir]
+cargo clean-all [dir]
 ```
 
 Keep target directories that have a size of less than `[filesize]`.

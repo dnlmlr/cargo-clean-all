@@ -8,10 +8,10 @@ use std::{
 };
 
 #[derive(Debug, Parser)]
-#[clap(author, version, about, long_about = None)]
+#[clap(author, version, about, bin_name = "cargo clean-all", long_about = None)]
 struct AppArgs {
     /// The directory that will be cleaned
-    #[clap(short = 'r', long = "dir", default_value_t  = String::from("."), value_name = "DIR")]
+    #[clap(default_value_t  = String::from("."), value_name = "DIR")]
     root_dir: String,
 
     /// Don't ask for confirmation
@@ -52,7 +52,15 @@ struct AppArgs {
 }
 
 fn main() {
-    let args = AppArgs::parse();
+    let mut args = std::env::args();
+
+    // When called using `cargo clean-all`, the argument `clean-all` is inserted. To fix the arg
+    // alignment, one argument is dropped.
+    if let Some("clean-all") = std::env::args().skip(1).next().as_deref() {
+        args.next();
+    }
+
+    let args = AppArgs::parse_from(args);
 
     let scan_path = Path::new(&args.root_dir);
 
