@@ -1,3 +1,4 @@
+use clap::Parser;
 use crossbeam_channel::Sender;
 use std::{
     fs,
@@ -6,73 +7,52 @@ use std::{
     time::SystemTime,
 };
 
-const HELP_TEXT: &str = r#"
-Recursively clean all rust project target directories under a given directory.
-
-Usage:
-    cargo clean-all [OPTIONS]
-
-Options:
-    --help             Display this help text
-    --dir [DIR]        Clean [DIR] instead of the working dir
-    --yes              Perform the cleaning without asking first
-    --dry-run          Just list the cleanable projects, don't ask to actually perform cleaning
-    --keep-size [SIZE] Keep target dirs with size below [SIZE]
-    --keep-days [DAYS] Keep target dirs modified less than [DAYS] days ago
-    --threads [NUM]    The number of threads used. By default as many threads as cpu cores
-
-Examples:
-    # Clean all projects in the current directory with a target-dir size of 500MB or more
-      ~/projects $ cargo clean-all --keep-size 500MB
-
-    # Clean all projects in the "~/projects" directory that were last compiled 7 or more days ago
-      / $ cargo clean-all --dir ~/projects --keep-days 7
-"#;
-
-#[derive(Debug)]
+#[derive(Debug, Parser)]
+#[clap(author, version, about, long_about = None)]
 struct AppArgs {
+    /// The directory that will be cleaned
+    #[clap(default_value_t  = String::from("."), value_name = "DIR")]
     root_dir: String,
+
+    /// Don't ask for confirmation
+    #[clap(short = 'y', long = "yes")]
     yes: bool,
+
+    /// Don't clean projects with target dir sizes below the specified size
+    #[clap(
+        short = 's',
+        long = "keep-size",
+        value_name = "SIZE",
+        default_value_t = 0
+    )]
     keep_size: u64,
-    keep_last_modified: f32,
+
+    /// Don't clean projects with target dirs modified in the last [DAYS] days
+    #[clap(
+        short = 'd',
+        long = "keep-days",
+        value_name = "DAYS",
+        default_value_t = 0
+    )]
+    keep_last_modified: u32,
+
+    /// Just collect the cleanable project dirs but don't attempt to clean anything
+    #[clap(long = "dry-run")]
     dry_run: bool,
+    
+    /// The number of threads to use for directory scaning. 0 uses the same amout of theres as CPU
+    /// cores
+    #[clap(
+        short = 't',
+        long = "threads",
+        value_name = "THREADS",
+        default_value_t = 0
+    )]
     number_of_threads: usize,
 }
 
-fn parse_args() -> Result<AppArgs, pico_args::Error> {
-    let mut pargs = pico_args::Arguments::from_env();
-
-    if pargs.contains("--help") {
-        print_help_and_exit();
-    }
-
-    Ok(AppArgs {
-        root_dir: pargs
-            .opt_value_from_str("--dir")?
-            .unwrap_or(".".to_string()),
-        yes: pargs.contains("--yes"),
-        keep_size: pargs
-            .opt_value_from_fn("--keep-size", |it| bytefmt::parse(it))?
-            .unwrap_or(0),
-        keep_last_modified: pargs.opt_value_from_str("--keep-days")?.unwrap_or(0_u16) as f32,
-        dry_run: pargs.contains("--dry-run"),
-        number_of_threads: pargs
-            .opt_value_from_str("--threads")?
-            .unwrap_or(num_cpus::get()),
-    })
-}
-
-fn print_help_and_exit() {
-    println!(
-        "cargo-clean-all v{}{}",
-        env!("CARGO_PKG_VERSION"),
-        HELP_TEXT
-    );
-    std::process::exit(0);
-}
-
 fn main() {
-    let args = parse_args().unwrap();
+    let args = AppArgs::parse();
 
     let scan_path = Path::new(&args.root_dir);
 
@@ -90,7 +70,7 @@ fn main() {
                 .unwrap_or_default()
                 .as_secs_f32();
             let days_elapsed = secs_elapsed / (60.0 * 60.0 * 24.0);
-            days_elapsed >= args.keep_last_modified && tgt.size > args.keep_size
+            days_elapsed >= args.keep_last_modified as f32 && tgt.size > args.keep_size
         });
 
     projects.sort_by_key(|it| it.size);
@@ -152,8 +132,10 @@ struct ProjectDir(PathBuf, bool);
 /// Recursively scan the given path for cargo projects using the specified number of threads.
 ///
 /// Panics when the number of threads is 0.
-fn find_cargo_projects(path: &Path, num_threads: usize) -> Vec<ProjectDir> {
-    assert!(num_threads > 0);
+fn find_cargo_projects(path: &Path, mut num_threads: usize) -> Vec<ProjectDir> {
+    if num_threads == 0 {
+        num_threads = num_cpus::get();
+    }
 
     {
         let (job_sender, job_receiver) = crossbeam_channel::unbounded::<Job>();
