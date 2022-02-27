@@ -1,6 +1,6 @@
 [package]
 name = "cargo-clean-all"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Daniel M <danielm-github@dnml.de>"]
 license = "MIT"
 repository = "https://github.com/dnlmlr/cargo-clean-all"

@@ -11,7 +11,7 @@ use std::{
 #[clap(author, version, about, long_about = None)]
 struct AppArgs {
     /// The directory that will be cleaned
-    #[clap(default_value_t  = String::from("."), value_name = "DIR")]
+    #[clap(short = 'r', long = "dir", default_value_t  = String::from("."), value_name = "DIR")]
     root_dir: String,
 
     /// Don't ask for confirmation
@@ -39,7 +39,7 @@ struct AppArgs {
     /// Just collect the cleanable project dirs but don't attempt to clean anything
     #[clap(long = "dry-run")]
     dry_run: bool,
-    
+
     /// The number of threads to use for directory scaning. 0 uses the same amout of theres as CPU
     /// cores
     #[clap(
