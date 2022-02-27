@@ -1,15 +1,23 @@
 # cargo-clean-all
+[![Crates.io](https://img.shields.io/crates/v/cargo-clean-all?style=flat-square)](https://crates.io/crates/cargo-clean-all)
+[![Crates.io](https://img.shields.io/crates/l/cargo-clean-all?style=flat-square)](https://crates.io/crates/cargo-clean-all)
 
-A custom cargo comand that analyses all cargo `target` directories under a given parent directory 
+## Why does it exist
+I was a bit shocked when I realized that my rust target directories took up a total of over 50gb, so I 
+developed this tool to help me clean up all the project target dirs. There is already 
+[cargo-clean-recursive](https://github.com/IgaguriMK/cargo-clean-recursive) which unfortunately 
+doesn't support keeping recent files in order to not slow down the projects I'm currently working on.
+
+## What does it do
+
+This is a custom cargo comand that analyses all cargo `target` directories under a given parent directory 
 and allows for cleaning them, following certain criteria. The cleaning-criteria include 
 `keep target dirs last modified X days ago` and `keep target dirs with size less than X`. Before 
 actually doing anything, the detected projects are listed with their individual and total target 
 dir sizes. The actual cleaning must be confirmed unless `--yes` is specified.
 
-I was shocked when I realized that my rust target directories took up a total of over 50gb, so I 
-developed this tool to help me clean up all the project target dirs. There is already 
-[cargo-clean-recursive](https://github.com/IgaguriMK/cargo-clean-recursive) which unfortunately 
-doesn't support keeping recent files in order to not slow down the projects I'm currently working on.
+**The actual cleaning consists of simply deleting the target directories from the detected projects,
+which seems to be what `cargo clean` does by default**
 
 ## Installation
 
@@ -56,6 +64,6 @@ cargo clean-all --threads [number of threads]
 | Display freed up / freeable disk space         | yes | no  |
 | Keep target dirs below a size threshold        | yes | no  |
 | Keep target dirs with a last modified treshold | yes | no  |
-| Ask before cleaning                            | yes | no |
+| Ask before cleaning                            | yes | no  |
 | Clean only `release`, `debug` or `docs`        | no (not yet)  | yes |
 | Speed (non scientific, cleaning my home dir)   | 15 sec | 24 sec |
