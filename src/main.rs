@@ -1,7 +1,6 @@
 use clap::Parser;
 use crossbeam_channel::Sender;
 use std::{
-    fs,
     io::{stdin, stdout, Write},
     path::{Path, PathBuf},
     time::SystemTime,
@@ -125,7 +124,7 @@ fn main() {
 
     projects
         .iter()
-        .for_each(|p| fs::remove_dir_all(&p.project_path.join("target")).unwrap());
+        .for_each(|p| remove_dir_all::remove_dir_all(&p.project_path.join("target")).unwrap());
 
     println!("Done!");
 }

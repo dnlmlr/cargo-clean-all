@@ -66,4 +66,9 @@ cargo clean-all --threads [number of threads]
 | Keep target dirs with a last modified treshold | yes | no  |
 | Ask before cleaning                            | yes | no  |
 | Clean only `release`, `debug` or `docs`        | no (not yet)  | yes |
-| Speed (non scientific, cleaning my home dir)   | 15 sec | 24 sec |
+| Real `cargo clean` command under the hood      | no  | yes |
+
+Note that `cargo-clean-recursive` uses the actual `cargo clean` command under the hood instead of 
+simply deleting the target directories. This gives makes the cleaning work exactly as intended by 
+the installed version of cargo, which can certainly be desirable in some cases.
+
