@@ -8,13 +8,13 @@ homepage = "https://github.com/dnlmlr/cargo-clean-all"
 readme = "README.md"
 description = "Recursively clean all cargo projects in a given directory that match the specified criteria"
 categories = ["development-tools::cargo-plugins", "command-line-utilities"]
-keywords = ["cargo-plugins", "cargo-clean", "cargo", "clean"]
+keywords = ["cargo-plugins", "cargo-clean", "cargo", "clean", "recursive"]
 edition = "2021"
 
 [dependencies]
-chrono = "0.4.19"
+chrono = "0.4.22"
 bytefmt = "0.1.7"
-clap = { version = "3.1.2", features = ["derive"] }
-crossbeam-channel = "0.5.2"
+clap = { version = "3.2.18", features = ["derive"] }
+crossbeam-channel = "0.5.6"
 num_cpus = "1.13.1"
 remove_dir_all = "0.7.0"
