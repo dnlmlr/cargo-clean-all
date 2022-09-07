@@ -55,7 +55,7 @@ fn main() {
 
     // When called using `cargo clean-all`, the argument `clean-all` is inserted. To fix the arg
     // alignment, one argument is dropped.
-    if let Some("clean-all") = std::env::args().skip(1).next().as_deref() {
+    if let Some("clean-all") = std::env::args().nth(1).as_deref() {
         args.next();
     }
 
@@ -138,31 +138,32 @@ struct ProjectDir(PathBuf, bool);
 
 /// Recursively scan the given path for cargo projects using the specified number of threads.
 ///
-/// Panics when the number of threads is 0.
+/// When the number of threads is 0, use as many threads as virtual CPU cores.
 fn find_cargo_projects(path: &Path, mut num_threads: usize) -> Vec<ProjectDir> {
     if num_threads == 0 {
         num_threads = num_cpus::get();
     }
 
     {
-        let (job_sender, job_receiver) = crossbeam_channel::unbounded::<Job>();
-        let (result_sender, result_receiver) = crossbeam_channel::unbounded::<ProjectDir>();
+        let (job_tx, job_rx) = crossbeam_channel::unbounded::<Job>();
+        let (result_tx, result_rx) = crossbeam_channel::unbounded::<ProjectDir>();
 
         (0..num_threads)
-            .map(|_| (job_receiver.clone(), result_sender.clone()))
-            .for_each(|(jr, rs)| {
+            .map(|_| (job_rx.clone(), result_tx.clone()))
+            .for_each(|(job_rx, result_tx)| {
                 std::thread::spawn(move || {
-                    jr.into_iter()
-                        .for_each(|job| find_cargo_projects_task(&job.0, job.1, rs.clone()))
+                    job_rx
+                        .into_iter()
+                        .for_each(|job| find_cargo_projects_task(job, result_tx.clone()))
                 });
             });
 
-        job_sender
+        job_tx
             .clone()
-            .send(Job(path.to_path_buf(), job_sender))
+            .send(Job(path.to_path_buf(), job_tx))
             .unwrap();
 
-        result_receiver
+        result_rx
     }
     .into_iter()
     .collect()
@@ -172,7 +173,9 @@ fn find_cargo_projects(path: &Path, mut num_threads: usize) -> Vec<ProjectDir> {
 /// Cargo.toml . Detected subdirectories should be queued as a new job in with the job_sender.
 ///
 /// This function is supposed to be called by the threadpool in find_cargo_projects
-fn find_cargo_projects_task(path: &Path, job_sender: Sender<Job>, results: Sender<ProjectDir>) {
+fn find_cargo_projects_task(job: Job, results: Sender<ProjectDir>) {
+    let path = job.0;
+    let job_sender = job.1;
     let mut has_target = false;
 
     let read_dir = match path.read_dir() {
@@ -189,8 +192,7 @@ fn find_cargo_projects_task(path: &Path, job_sender: Sender<Job>, results: Sende
 
     let has_cargo_toml = files
         .iter()
-        .find(|it| it.file_name().unwrap_or_default().to_string_lossy() == "Cargo.toml")
-        .is_some();
+        .any(|it| it.file_name().unwrap_or_default().to_string_lossy() == "Cargo.toml");
 
     // Iterate through the subdirectories of path, ignoring entries that caused errors
     for it in dirs {
@@ -208,9 +210,7 @@ fn find_cargo_projects_task(path: &Path, job_sender: Sender<Job>, results: Sende
 
     // If path contains a Cargo.toml, it is a project directory
     if has_cargo_toml {
-        results
-            .send(ProjectDir(path.to_path_buf(), has_target))
-            .unwrap();
+        results.send(ProjectDir(path, has_target)).unwrap();
     }
 }
 
@@ -245,7 +245,7 @@ impl ProjectTargetAnalysis {
         }
 
         match (path.is_file(), path.metadata()) {
-            (true, Ok(md)) => return (md.len(), md.modified().unwrap_or(default.1)),
+            (true, Ok(md)) => (md.len(), md.modified().unwrap_or(default.1)),
             _ => path
                 .read_dir()
                 .unwrap()
