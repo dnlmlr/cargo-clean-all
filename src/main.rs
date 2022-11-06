@@ -9,24 +9,28 @@ use std::{
 #[derive(Debug, Parser)]
 #[clap(author, version, about, bin_name = "cargo clean-all", long_about = None)]
 struct AppArgs {
-    /// The directory that will be cleaned
+    /// The directory in which the projects will be searched
     #[arg(default_value_t  = String::from("."), value_name = "DIR")]
     root_dir: String,
 
-    /// Don't ask for confirmation
+    /// Don't ask for confirmation; Just clean all detected projects that are not excluded by other
+    /// constraints
     #[arg(short = 'y', long = "yes")]
     yes: bool,
 
-    /// Don't clean projects with target dir sizes below the specified size
+    /// Ignore projects with a target dir size smaller than the specified value. The size can be
+    /// specified using binary prefixes like "10MB" for 10_000_000 bytes, or "1KiB" for 1_000 bytes
     #[arg(
         short = 's',
         long = "keep-size",
         value_name = "SIZE",
-        default_value_t = 0
+        default_value_t = 0,
+        value_parser = parse_bytes_from_str
     )]
     keep_size: u64,
 
-    /// Don't clean projects with target dirs modified in the last [DAYS] days
+    /// Ignore projects that have been compiled in the last [DAYS] days. The last compilation time
+    /// is infered by the last modified time of the contents of target directory.
     #[arg(
         short = 'd',
         long = "keep-days",
@@ -35,12 +39,12 @@ struct AppArgs {
     )]
     keep_last_modified: u32,
 
-    /// Just collect the cleanable project dirs but don't attempt to clean anything
+    /// Just collect the cleanable projects and list the freeable space, but don't delete anything
     #[arg(long = "dry-run")]
     dry_run: bool,
 
-    /// The number of threads to use for directory scaning. 0 uses the same amout of theres as CPU
-    /// cores
+    /// The number of threads to use for directory scaning. 0 automatically selects the number of
+    /// threads
     #[arg(
         short = 't',
         long = "threads",
@@ -48,6 +52,11 @@ struct AppArgs {
         default_value_t = 0
     )]
     number_of_threads: usize,
+}
+
+/// Wrap the bytefmt::parse function to return the error as an owned String
+fn parse_bytes_from_str(byte_str: &str) -> Result<u64, String> {
+    bytefmt::parse(byte_str).map_err(|e| e.to_string())
 }
 
 fn main() {
