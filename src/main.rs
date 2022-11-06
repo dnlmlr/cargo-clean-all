@@ -10,15 +10,15 @@ use std::{
 #[clap(author, version, about, bin_name = "cargo clean-all", long_about = None)]
 struct AppArgs {
     /// The directory that will be cleaned
-    #[clap(default_value_t  = String::from("."), value_name = "DIR")]
+    #[arg(default_value_t  = String::from("."), value_name = "DIR")]
     root_dir: String,
 
     /// Don't ask for confirmation
-    #[clap(short = 'y', long = "yes")]
+    #[arg(short = 'y', long = "yes")]
     yes: bool,
 
     /// Don't clean projects with target dir sizes below the specified size
-    #[clap(
+    #[arg(
         short = 's',
         long = "keep-size",
         value_name = "SIZE",
@@ -27,7 +27,7 @@ struct AppArgs {
     keep_size: u64,
 
     /// Don't clean projects with target dirs modified in the last [DAYS] days
-    #[clap(
+    #[arg(
         short = 'd',
         long = "keep-days",
         value_name = "DAYS",
@@ -36,12 +36,12 @@ struct AppArgs {
     keep_last_modified: u32,
 
     /// Just collect the cleanable project dirs but don't attempt to clean anything
-    #[clap(long = "dry-run")]
+    #[arg(long = "dry-run")]
     dry_run: bool,
 
     /// The number of threads to use for directory scaning. 0 uses the same amout of theres as CPU
     /// cores
-    #[clap(
+    #[arg(
         short = 't',
         long = "threads",
         value_name = "THREADS",
