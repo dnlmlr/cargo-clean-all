@@ -53,11 +53,21 @@ struct AppArgs {
         default_value_t = 0
     )]
     number_of_threads: usize,
+
+    /// Directories that should be ignored by default, including subdirectories
+    #[arg(long = "ignore")]
+    ignore: Vec<String>,
 }
 
 /// Wrap the bytefmt::parse function to return the error as an owned String
 fn parse_bytes_from_str(byte_str: &str) -> Result<u64, String> {
     bytefmt::parse(byte_str).map_err(|e| e.to_string())
+}
+
+fn starts_with_canonicalized(a: impl AsRef<Path>, b: impl AsRef<Path>) -> bool {
+    std::fs::canonicalize(a)
+        .unwrap()
+        .starts_with(std::fs::canonicalize(b).unwrap())
 }
 
 fn main() {
@@ -95,7 +105,11 @@ fn main() {
                 .unwrap_or_default()
                 .as_secs_f32();
             let days_elapsed = secs_elapsed / (60.0 * 60.0 * 24.0);
-            days_elapsed >= args.keep_last_modified as f32 && tgt.size > args.keep_size
+            let ignored = args
+                .ignore
+                .iter()
+                .any(|p| starts_with_canonicalized(&tgt.project_path, p));
+            days_elapsed >= args.keep_last_modified as f32 && tgt.size > args.keep_size && !ignored
         })
         .collect::<Vec<_>>();
 
@@ -230,8 +244,10 @@ fn find_cargo_projects_task(job: Job, results: Sender<ProjectDir>) {
     for it in dirs {
         let filename = it.file_name().unwrap_or_default().to_string_lossy();
         match filename.as_ref() {
-            // No need to search .git directories for cargo projects
-            ".git" => (),
+            // No need to search .git directories for cargo projects. Also skip .cargo directories
+            // as there shouldn't be any target dirs in there. Even if there are valid target dirs,
+            // they should probably not be deleted. See issue #2 (https://github.com/dnlmlr/cargo-clean-all/issues/2)
+            ".git" | ".cargo" => (),
             "target" if has_cargo_toml => has_target = true,
             // For directories queue a new job to search it with the threadpool
             _ => job_sender
