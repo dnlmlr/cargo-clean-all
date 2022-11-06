@@ -18,3 +18,5 @@ clap = { version = "4.0.19", features = ["derive"] }
 crossbeam-channel = "0.5.6"
 num_cpus = "1.14.0"
 remove_dir_all = "0.7.0"
+dialoguer = "0.10.2"
+colored = "2.0.0"

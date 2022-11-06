@@ -1,7 +1,8 @@
 use clap::Parser;
+use colored::Colorize;
 use crossbeam_channel::Sender;
 use std::{
-    io::{stdin, stdout, Write},
+    fmt::Display,
     path::{Path, PathBuf},
     time::SystemTime,
 };
@@ -60,6 +61,10 @@ fn parse_bytes_from_str(byte_str: &str) -> Result<u64, String> {
 }
 
 fn main() {
+    // Enable ANSI escape codes on window 10. This always returns `Ok(())`, so unwrap is fine
+    #[cfg(windows)]
+    colored::control::set_virtual_terminal(true).unwrap();
+
     let mut args = std::env::args();
 
     // When called using `cargo clean-all`, the argument `clean-all` is inserted. To fix the arg
@@ -72,14 +77,18 @@ fn main() {
 
     let scan_path = Path::new(&args.root_dir);
 
-    // Find project dirs
-    let project_dirs = find_cargo_projects(scan_path, args.number_of_threads);
-
-    // Analyse project dirs and find out which of them are supposed to be cleaned
-    let (mut projects, mut ignored): (Vec<_>, Vec<_>) = project_dirs
+    // Find project dirs and analyze them
+    let mut projects: Vec<_> = find_cargo_projects(scan_path, args.number_of_threads)
         .into_iter()
-        .filter_map(|it| it.1.then(|| ProjectTargetAnalysis::analyze(&it.0)))
-        .partition(|tgt| {
+        .filter_map(|proj| proj.1.then(|| ProjectTargetAnalysis::analyze(&proj.0)))
+        .collect();
+
+    projects.sort_by_key(|proj| proj.size);
+
+    // Determin what projects are selected by the restrictions
+    let preselected_projects = projects
+        .iter()
+        .map(|tgt| {
             let secs_elapsed = tgt
                 .last_modified
                 .elapsed()
@@ -87,28 +96,42 @@ fn main() {
                 .as_secs_f32();
             let days_elapsed = secs_elapsed / (60.0 * 60.0 * 24.0);
             days_elapsed >= args.keep_last_modified as f32 && tgt.size > args.keep_size
-        });
+        })
+        .collect::<Vec<_>>();
 
-    projects.sort_by_key(|it| it.size);
-    ignored.sort_by_key(|it| it.size);
+    let Ok(Some(prompt)) = dialoguer::MultiSelect::new()
+        .items(&projects)
+        .with_prompt("Select projects to clean")
+        .report(false)
+        .defaults(&preselected_projects)
+        .interact_opt() else {
+            println!("Nothing selected");
+            return;
+        };
 
-    let total_size: u64 = projects.iter().map(|it| it.size).sum();
+    for idx in prompt {
+        projects[idx].selected_for_cleanup = true;
+    }
+
+    let (selected, ignored): (Vec<_>, Vec<_>) = projects
+        .into_iter()
+        .partition(|proj| proj.selected_for_cleanup);
+
+    let will_free_size: u64 = selected.iter().map(|it| it.size).sum();
+    let ignored_free_size: u64 = ignored.iter().map(|it| it.size).sum();
 
     println!("Ignoring the following project directories:");
-    ignored
-        .iter()
-        .for_each(ProjectTargetAnalysis::print_listformat);
+    ignored.iter().for_each(|p| println!("{}", p));
 
     println!("\nSelected the following project directories for cleaning:");
-    projects
-        .iter()
-        .for_each(ProjectTargetAnalysis::print_listformat);
+    selected.iter().for_each(|p| println!("{}", p));
 
     println!(
-        "\nSelected {}/{} projects, total freeable size: {}",
-        projects.len(),
-        projects.len() + ignored.len(),
-        bytefmt::format(total_size)
+        "\nSelected {}/{} projects, cleaning will free: {}. Keeping: {}",
+        selected.len(),
+        selected.len() + ignored.len(),
+        bytefmt::format(will_free_size).bold(),
+        bytefmt::format(ignored_free_size)
     );
 
     if args.dry_run {
@@ -118,12 +141,12 @@ fn main() {
 
     // Confirm cleanup if --yes is not present in the args
     if !args.yes {
-        let mut inp = String::new();
-        print!("Clean the project directories shown above? (yes/no): ");
-        stdout().flush().unwrap();
-        stdin().read_line(&mut inp).unwrap();
-
-        if inp.trim().to_lowercase() != "yes" {
+        if !dialoguer::Confirm::new()
+            .with_prompt("Clean the project directories shown above?")
+            .wait_for_newline(true)
+            .interact()
+            .unwrap()
+        {
             println!("Cleanup cancelled");
             return;
         }
@@ -131,7 +154,7 @@ fn main() {
 
     println!("Starting cleanup...");
 
-    projects
+    selected
         .iter()
         .for_each(|p| remove_dir_all::remove_dir_all(&p.project_path.join("target")).unwrap());
 
@@ -223,6 +246,7 @@ fn find_cargo_projects_task(job: Job, results: Sender<ProjectDir>) {
     }
 }
 
+#[derive(Clone, Debug)]
 struct ProjectTargetAnalysis {
     /// The path of the project without the `target` directory suffix
     project_path: PathBuf,
@@ -230,6 +254,8 @@ struct ProjectTargetAnalysis {
     size: u64,
     /// The timestamp of the last recently modified file in the target directory
     last_modified: SystemTime,
+    /// Indicate that this target directory should be cleaned
+    selected_for_cleanup: bool,
 }
 
 impl ProjectTargetAnalysis {
@@ -240,6 +266,7 @@ impl ProjectTargetAnalysis {
             project_path: path.to_owned(),
             size,
             last_modified,
+            selected_for_cleanup: false,
         }
     }
 
@@ -263,18 +290,35 @@ impl ProjectTargetAnalysis {
                 .fold(default, |a, b| (a.0 + b.0, a.1.max(b.1))),
         }
     }
+}
 
-    fn print_listformat(&self) {
-        let path = std::fs::canonicalize(&self.project_path).unwrap();
-        let project_name = path.file_name().unwrap_or_default().to_string_lossy();
+/// Remove the `\\?\` prefix from canonicalized windows paths and replace all `\` path separators
+/// with `/`. This could make paths non-copyable in some special cases but those paths are mainly
+/// intended for identifying the projects, so this is fine.
+fn pretty_format_path(p: &Path) -> String {
+    p.display()
+        .to_string()
+        .replace("\\\\?\\", "")
+        .replace("\\", "/")
+}
+
+impl Display for ProjectTargetAnalysis {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let project_name = self
+            .project_path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy();
+        let path = pretty_format_path(&std::fs::canonicalize(&self.project_path).unwrap());
 
         let last_modified: chrono::DateTime<chrono::Local> = self.last_modified.into();
-        println!(
-            "  {} : {}\n      {}, {}",
-            project_name,
-            path.display(),
+        write!(
+            f,
+            "{}: {} ({}), {}",
+            project_name.bold(),
+            bytefmt::format(self.size),
             last_modified.format("%Y-%m-%d %H:%M"),
-            bytefmt::format(self.size)
+            path,
         )
     }
 }
