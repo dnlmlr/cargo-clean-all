@@ -153,10 +153,7 @@ fn main() {
                 .iter()
                 .any(|p| starts_with_canonicalized(&tgt.project_path, p));
 
-            let selected = days_elapsed >= args.keep_last_modified as f32
-                && tgt.size > args.keep_size
-                && !ignored;
-            selected
+            days_elapsed >= args.keep_last_modified as f32 && tgt.size > args.keep_size && !ignored
         })
         .collect::<Vec<_>>();
 
@@ -209,16 +206,15 @@ fn main() {
     }
 
     // Confirm cleanup if --yes is not present in the args
-    if !args.yes {
-        if !dialoguer::Confirm::new()
+    if !args.yes
+        && !dialoguer::Confirm::new()
             .with_prompt("Clean the project directories shown above?")
             .wait_for_newline(true)
             .interact()
             .unwrap()
-        {
-            println!("Cleanup cancelled");
-            return;
-        }
+    {
+        println!("Cleanup cancelled");
+        return;
     }
 
     println!("Starting cleanup...");
@@ -385,7 +381,7 @@ fn pretty_format_path(p: &Path) -> String {
     p.display()
         .to_string()
         .replace("\\\\?\\", "")
-        .replace("\\", "/")
+        .replace('\\', "/")
 }
 
 impl Display for ProjectTargetAnalysis {
