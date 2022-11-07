@@ -92,7 +92,30 @@ fn main() {
 
     let scan_path = Path::new(&args.root_dir);
 
-    let scan_progress = ProgressBar::new_spinner().with_message("Scaning for projects");
+    let scan_progress = ProgressBar::new_spinner()
+        .with_message("Scaning for projects")
+        .with_style(ProgressStyle::default_spinner().tick_strings(&[
+            "[=---------]",
+            "[-=--------]",
+            "[--=-------]",
+            "[---=------]",
+            "[----=-----]",
+            "[-----=----]",
+            "[------=---]",
+            "[-------=--]",
+            "[--------=-]",
+            "[---------=]",
+            "[--------=-]",
+            "[-------=--]",
+            "[------=---]",
+            "[-----=----]",
+            "[----=-----]",
+            "[---=------]",
+            "[--=-------]",
+            "[-=--------]",
+            "[=---------]",
+        ]));
+
     scan_progress.enable_steady_tick(Duration::from_millis(100));
 
     // Find project dirs and analyze them
