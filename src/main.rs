@@ -148,9 +148,6 @@ fn main() {
             let selected = days_elapsed >= args.keep_last_modified as f32
                 && tgt.size > args.keep_size
                 && !ignored;
-
-            tgt.selected_for_cleanup = selected;
-
             selected
         })
         .collect::<Vec<_>>();
@@ -167,8 +164,13 @@ fn main() {
             println!("Nothing selected");
             return;
         };
+
         for idx in prompt {
             projects[idx].selected_for_cleanup = true;
+        }
+    } else {
+        for i in 0..preselected_projects.len() {
+            projects[i].selected_for_cleanup = preselected_projects[i];
         }
     }
 
