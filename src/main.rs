@@ -59,6 +59,10 @@ struct AppArgs {
     #[arg(short = 'v', long = "verbose")]
     verbose: bool,
 
+    /// Disable the interactive project selection
+    #[arg(short = 'n', long = "non-interactive")]
+    non_interactive: bool,
+
     /// Directories that should be ignored by default, including subdirectories
     #[arg(long = "ignore")]
     ignore: Vec<String>,
@@ -128,7 +132,7 @@ fn main() {
 
     // Determin what projects are selected by the restrictions
     let preselected_projects = projects
-        .iter()
+        .iter_mut()
         .map(|tgt| {
             let secs_elapsed = tgt
                 .last_modified
@@ -140,13 +144,21 @@ fn main() {
                 .ignore
                 .iter()
                 .any(|p| starts_with_canonicalized(&tgt.project_path, p));
-            days_elapsed >= args.keep_last_modified as f32 && tgt.size > args.keep_size && !ignored
+
+            let selected = days_elapsed >= args.keep_last_modified as f32
+                && tgt.size > args.keep_size
+                && !ignored;
+
+            tgt.selected_for_cleanup = selected;
+
+            selected
         })
         .collect::<Vec<_>>();
 
     scan_progress.finish_and_clear();
 
-    let Ok(Some(prompt)) = dialoguer::MultiSelect::new()
+    if !args.non_interactive {
+        let Ok(Some(prompt)) = dialoguer::MultiSelect::new()
         .items(&projects)
         .with_prompt("Select projects to clean")
         .report(false)
@@ -155,9 +167,9 @@ fn main() {
             println!("Nothing selected");
             return;
         };
-
-    for idx in prompt {
-        projects[idx].selected_for_cleanup = true;
+        for idx in prompt {
+            projects[idx].selected_for_cleanup = true;
+        }
     }
 
     let (selected, ignored): (Vec<_>, Vec<_>) = projects
