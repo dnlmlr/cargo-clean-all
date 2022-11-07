@@ -55,6 +55,10 @@ struct AppArgs {
     )]
     number_of_threads: usize,
 
+    /// Show access errors that occur while scanning. By default those errors are hidden
+    #[arg(short = 'v', long = "verbose")]
+    verbose: bool,
+
     /// Directories that should be ignored by default, including subdirectories
     #[arg(long = "ignore")]
     ignore: Vec<String>,
@@ -92,7 +96,7 @@ fn main() {
     scan_progress.enable_steady_tick(Duration::from_millis(100));
 
     // Find project dirs and analyze them
-    let mut projects: Vec<_> = find_cargo_projects(scan_path, args.number_of_threads)
+    let mut projects: Vec<_> = find_cargo_projects(scan_path, args.number_of_threads, args.verbose)
         .into_iter()
         .filter_map(|proj| proj.1.then(|| ProjectTargetAnalysis::analyze(&proj.0)))
         .collect();
@@ -206,7 +210,7 @@ struct ProjectDir(PathBuf, bool);
 /// Recursively scan the given path for cargo projects using the specified number of threads.
 ///
 /// When the number of threads is 0, use as many threads as virtual CPU cores.
-fn find_cargo_projects(path: &Path, mut num_threads: usize) -> Vec<ProjectDir> {
+fn find_cargo_projects(path: &Path, mut num_threads: usize, verbose: bool) -> Vec<ProjectDir> {
     if num_threads == 0 {
         num_threads = num_cpus::get();
     }
@@ -221,7 +225,7 @@ fn find_cargo_projects(path: &Path, mut num_threads: usize) -> Vec<ProjectDir> {
                 std::thread::spawn(move || {
                     job_rx
                         .into_iter()
-                        .for_each(|job| find_cargo_projects_task(job, result_tx.clone()))
+                        .for_each(|job| find_cargo_projects_task(job, result_tx.clone(), verbose))
                 });
             });
 
@@ -240,7 +244,7 @@ fn find_cargo_projects(path: &Path, mut num_threads: usize) -> Vec<ProjectDir> {
 /// Cargo.toml . Detected subdirectories should be queued as a new job in with the job_sender.
 ///
 /// This function is supposed to be called by the threadpool in find_cargo_projects
-fn find_cargo_projects_task(job: Job, results: Sender<ProjectDir>) {
+fn find_cargo_projects_task(job: Job, results: Sender<ProjectDir>, verbose: bool) {
     let path = job.0;
     let job_sender = job.1;
     let mut has_target = false;
@@ -248,7 +252,7 @@ fn find_cargo_projects_task(job: Job, results: Sender<ProjectDir>) {
     let read_dir = match path.read_dir() {
         Ok(it) => it,
         Err(e) => {
-            eprintln!("Error reading directory: '{}'  {}", path.display(), e);
+            verbose.then(|| eprintln!("Error reading directory: '{}'  {}", path.display(), e));
             return;
         }
     };
