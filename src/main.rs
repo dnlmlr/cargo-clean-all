@@ -1,5 +1,5 @@
 use clap::Parser;
-use colored::Colorize;
+use colored::{Color, Colorize};
 use crossbeam_channel::Sender;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::{
@@ -80,6 +80,14 @@ fn starts_with_canonicalized(a: impl AsRef<Path>, b: impl AsRef<Path>) -> bool {
 }
 
 fn main() {
+    // If the program is interrupted while in a dialog the cursor stays hidden. This makes sure
+    // that the cursor is shown when interrupting the program
+    ctrlc::set_handler(|| {
+        dialoguer::console::Term::stdout().show_cursor().unwrap();
+        std::process::exit(1);
+    })
+    .unwrap();
+
     // Enable ANSI escape codes on window 10. This always returns `Ok(())`, so unwrap is fine
     #[cfg(windows)]
     colored::control::set_virtual_terminal(true).unwrap();
@@ -97,7 +105,7 @@ fn main() {
     let scan_path = Path::new(&args.root_dir);
 
     let scan_progress = ProgressBar::new_spinner()
-        .with_message("Scaning for projects")
+        .with_message(format!("Scaning for projects in {}", args.root_dir))
         .with_style(ProgressStyle::default_spinner().tick_strings(&[
             "[=---------]",
             "[-=--------]",
@@ -156,14 +164,14 @@ fn main() {
 
     if !args.non_interactive {
         let Ok(Some(prompt)) = dialoguer::MultiSelect::new()
-        .items(&projects)
-        .with_prompt("Select projects to clean")
-        .report(false)
-        .defaults(&preselected_projects)
-        .interact_opt() else {
-            println!("Nothing selected");
-            return;
-        };
+            .items(&projects)
+            .with_prompt("Select projects to clean")
+            .report(false)
+            .defaults(&preselected_projects)
+            .interact_opt() else {
+                println!("Nothing selected");
+                return;
+            };
 
         for idx in prompt {
             projects[idx].selected_for_cleanup = true;
@@ -393,7 +401,7 @@ impl Display for ProjectTargetAnalysis {
         write!(
             f,
             "{}: {} ({}), {}",
-            project_name.bold(),
+            project_name.bold().color(Color::Green),
             bytefmt::format(self.size),
             last_modified.format("%Y-%m-%d %H:%M"),
             path,
