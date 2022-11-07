@@ -3,18 +3,21 @@
 [![Crates.io](https://img.shields.io/crates/l/cargo-clean-all?style=flat-square)](https://crates.io/crates/cargo-clean-all)
 
 ## Why does it exist
-I was a bit shocked when I realized that my rust target directories took up a total of over 50gb, so I 
-developed this tool to help me clean up all the project target dirs. There is already 
+I was a bit shocked when I realized that my rust target directories took up a total of over 50gb, 
+so I developed this tool to help me clean up all the project target dirs. There is already 
 [cargo-clean-recursive](https://github.com/IgaguriMK/cargo-clean-recursive) which unfortunately 
-doesn't support keeping recent files in order to not slow down the projects I'm currently working on.
+doesn't support keeping interactive selections or recent files in order to not slow down the 
+projects I'm currently working on.
 
 ## What does it do
 
-This is a custom cargo comand that analyses all cargo `target` directories under a given parent directory 
-and allows for cleaning them, following certain criteria. The cleaning-criteria include 
-`keep target dirs last modified X days ago` and `keep target dirs with size less than X`. Before 
-actually doing anything, the detected projects are listed with their individual and total target 
-dir sizes. The actual cleaning must be confirmed unless `--yes` is specified.
+This is a custom `cargo` subcomand that searches all rust cargo projects in a given parent 
+directory and deletes the build artifacts (aka target directories). Before cleanup it shows the 
+amount of disk space that can be freed up. Specific projects can be excluded from cleaning using 
+an interactive selection, and/or CLI filters. The CLI filters can exclude projects that have been 
+compiled in the last X days, have a target directory that is smaller than X, or are specifically 
+ignored.
+
 
 **The actual cleaning consists of simply deleting the target directories from the detected projects,
 which seems to be what `cargo clean` does by default**
@@ -28,29 +31,26 @@ cargo install cargo-clean-all
 
 ## Usage
 
-Clean all target directories under the current working directory.
+Clean all projects in the current working directory with the possibility to 
+interactively deselect projects. (Interactive mode is enabled by default)
 ```
 cargo clean-all
 ```
 
-Clean all target directories under the directory `[dir]`.
+Clean all projects in the home directory (and subdirectories) that haven't been compiled in the 
+last 7 days.
 ```
-cargo clean-all [dir]
-```
-
-Keep target directories that have a size of less than `[filesize]`.
-```
-cargo clean-all --keep-size [filesize]
+cargo clean-all --keep-days 7 ~
 ```
 
-Keep target directories younger than `[days]` days.
+Clean all projects in the home directory (and subdirectories) that take up more than 10MB.
 ```
-cargo clean-all --keep-days [days]
+cargo clean-all --keep-size 10MB ~
 ```
 
-Specify the number of threads to use for the recursive scan .
+Clean all projects in the home directory (and subdirectories), excluding the Download and Documents directories.
 ```
-cargo clean-all --threads [number of threads]
+cargo clean-all --ignore ~/Downloads --ignore ~/Documents ~
 ```
 
 # Alternatives
@@ -65,10 +65,34 @@ cargo clean-all --threads [number of threads]
 | Keep target dirs below a size threshold        | yes | no  |
 | Keep target dirs with a last modified treshold | yes | no  |
 | Ask before cleaning                            | yes | no  |
+| Interactive selection of projects              | yes | no  |
 | Clean only `release`, `debug` or `docs`        | no (not yet)  | yes |
 | Real `cargo clean` command under the hood      | no  | yes |
 
 Note that `cargo-clean-recursive` uses the actual `cargo clean` command under the hood instead of 
-simply deleting the target directories. This gives makes the cleaning work exactly as intended by 
+simply deleting the target directories. This gies makes the cleaning work exactly as intended by 
 the installed version of cargo, which can certainly be desirable in some cases.
 
+---
+## Manual
+
+```
+Recursively clean all cargo projects in a given directory that match the specified criteria
+
+Usage: cargo clean-all [OPTIONS] [DIR]
+
+Arguments:
+  [DIR]  The directory in which the projects will be searched [default: .]
+
+Options:
+  -y, --yes                Don't ask for confirmation; Just clean all detected projects that are not excluded by other constraints
+  -s, --keep-size <SIZE>   Ignore projects with a target dir size smaller than the specified value. The size can be specified using binary prefixes like "10MB" for 10_000_000 bytes, or "1KiB" for 1_000 bytes [default: 0]
+  -d, --keep-days <DAYS>   Ignore projects that have been compiled in the last [DAYS] days. The last compilation time is infered by the last modified time of the contents of target directory [default: 0]
+      --dry-run            Just collect the cleanable projects and list the freeable space, but don't delete anything
+  -t, --threads <THREADS>  The number of threads to use for directory scaning. 0 automatically selects the number of threads [default: 0]
+  -v, --verbose            Show access errors that occur while scanning. By default those errors are hidden
+  -n, --non-interactive    Disable the interactive project selection
+      --ignore <IGNORE>    Directories that should be ignored by default, including subdirectories
+  -h, --help               Print help information
+  -V, --version            Print version information
+```
