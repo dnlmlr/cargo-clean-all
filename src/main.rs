@@ -1,10 +1,11 @@
 use clap::Parser;
 use colored::Colorize;
 use crossbeam_channel::Sender;
+use indicatif::{ProgressBar, ProgressStyle};
 use std::{
     fmt::Display,
     path::{Path, PathBuf},
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 
 #[derive(Debug, Parser)]
@@ -87,6 +88,9 @@ fn main() {
 
     let scan_path = Path::new(&args.root_dir);
 
+    let scan_progress = ProgressBar::new_spinner().with_message("Scaning for projects");
+    scan_progress.enable_steady_tick(Duration::from_millis(100));
+
     // Find project dirs and analyze them
     let mut projects: Vec<_> = find_cargo_projects(scan_path, args.number_of_threads)
         .into_iter()
@@ -112,6 +116,8 @@ fn main() {
             days_elapsed >= args.keep_last_modified as f32 && tgt.size > args.keep_size && !ignored
         })
         .collect::<Vec<_>>();
+
+    scan_progress.finish_and_clear();
 
     let Ok(Some(prompt)) = dialoguer::MultiSelect::new()
         .items(&projects)
@@ -168,11 +174,26 @@ fn main() {
 
     println!("Starting cleanup...");
 
-    selected
-        .iter()
-        .for_each(|p| remove_dir_all::remove_dir_all(&p.project_path.join("target")).unwrap());
+    let clean_progress = ProgressBar::new(selected.len() as u64)
+        .with_message("Deleting target directories")
+        .with_style(
+            ProgressStyle::default_bar()
+                .template("{msg} [{bar:20}] {pos:>3}/{len:3}")
+                .unwrap()
+                .progress_chars("=> "),
+        );
 
-    println!("Done!");
+    selected.iter().for_each(|tgt| {
+        clean_progress.inc(1);
+        remove_dir_all::remove_dir_all(&tgt.project_path.join("target")).unwrap();
+    });
+
+    clean_progress.finish();
+
+    println!(
+        "All projects cleaned. Reclaimed {} of disk space",
+        bytefmt::format(will_free_size).bold()
+    );
 }
 
 /// Job for the threaded project finder. First the path to be searched, second the sender to create
