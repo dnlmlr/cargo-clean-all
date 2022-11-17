@@ -122,11 +122,17 @@ fn main() {
 
     println!("Starting cleanup...");
 
-    projects
-        .iter()
-        .for_each(|p| remove_dir_all::remove_dir_all(&p.project_path.join("target")).unwrap());
+    projects.iter().for_each(|p| {
+        match remove_dir_all::remove_dir_all(&p.project_path.join("target")) {
+            Ok(_) => println!("- Successfully cleaned {}", p.project_path.display()),
+            Err(err) => {
+                println!("- Failed to clean {}", p.project_path.display());
+                println!("  Error: {}", err);
+            }
+        }
+    });
 
-    println!("Done!");
+    println!("\nDone!");
 }
 
 /// Job for the threaded project finder. First the path to be searched, second the sender to create
