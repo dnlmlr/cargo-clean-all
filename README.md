@@ -2,6 +2,8 @@
 [![Crates.io](https://img.shields.io/crates/v/cargo-clean-all?style=flat-square)](https://crates.io/crates/cargo-clean-all)
 [![Crates.io](https://img.shields.io/crates/l/cargo-clean-all?style=flat-square)](https://crates.io/crates/cargo-clean-all)
 
+![cargo clean-all demo](assets/cargo-clean-all-demo.gif)
+
 ## Why does it exist
 I was a bit shocked when I realized that my rust target directories took up a total of over 50gb, 
 so I developed this tool to help me clean up all the project target dirs. There is already 
