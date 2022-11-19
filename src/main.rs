@@ -21,7 +21,7 @@ struct AppArgs {
     yes: bool,
 
     /// Ignore projects with a target dir size smaller than the specified value. The size can be
-    /// specified using binary prefixes like "10MB" for 10_000_000 bytes, or "1KiB" for 1_000 bytes
+    /// specified using binary prefixes like "10MB" for 10_000_000 bytes, or "1KiB" for 1_024 bytes
     #[arg(
         short = 's',
         long = "keep-size",
