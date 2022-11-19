@@ -73,10 +73,13 @@ fn parse_bytes_from_str(byte_str: &str) -> Result<u64, String> {
     bytefmt::parse(byte_str).map_err(|e| e.to_string())
 }
 
+/// Try to get the canonicalized path and return the non canonicalized path if it doesn't work
+fn canonicalize_or_not(p: impl AsRef<Path>) -> PathBuf {
+    std::fs::canonicalize(p.as_ref()).unwrap_or_else(|_| p.as_ref().to_path_buf())
+}
+
 fn starts_with_canonicalized(a: impl AsRef<Path>, b: impl AsRef<Path>) -> bool {
-    std::fs::canonicalize(a)
-        .unwrap()
-        .starts_with(std::fs::canonicalize(b).unwrap())
+    canonicalize_or_not(a).starts_with(canonicalize_or_not(b))
 }
 
 fn main() {
@@ -228,16 +231,30 @@ fn main() {
                 .progress_chars("=> "),
         );
 
-    selected.iter().for_each(|tgt| {
-        clean_progress.inc(1);
-        remove_dir_all::remove_dir_all(&tgt.project_path.join("target")).unwrap();
-    });
+    let failed_cleanups = selected
+        .iter()
+        .filter_map(|tgt| {
+            clean_progress.inc(1);
+            remove_dir_all::remove_dir_all(&tgt.project_path.join("target"))
+                .err()
+                .map(|e| (tgt.clone(), e))
+        })
+        .collect::<Vec<_>>();
 
     clean_progress.finish();
 
+    // The current leftover size calculation assumes that a failed deletion didn't delete anything.
+    // This will not be true in most cases as a recursive deletion might delet stuff before failing.
+    let mut leftover_size = 0;
+    for (tgt, e) in &failed_cleanups {
+        leftover_size += tgt.size;
+        println!("Failed to clean {}", pretty_format_path(&tgt.project_path));
+        println!("Error: {}", e);
+    }
+
     println!(
-        "All projects cleaned. Reclaimed {} of disk space",
-        bytefmt::format(will_free_size).bold()
+        "\nAll projects cleaned. Reclaimed {} of disk space",
+        bytefmt::format(will_free_size - leftover_size).bold()
     );
 }
 
@@ -366,10 +383,12 @@ impl ProjectTargetAnalysis {
             (true, Ok(md)) => (md.len(), md.modified().unwrap_or(default.1)),
             _ => path
                 .read_dir()
-                .unwrap()
-                .filter_map(|it| it.ok().map(|it| it.path()))
-                .map(Self::recursive_scan_target)
-                .fold(default, |a, b| (a.0 + b.0, a.1.max(b.1))),
+                .map(|rd| {
+                    rd.filter_map(|it| it.ok().map(|it| it.path()))
+                        .map(Self::recursive_scan_target)
+                        .fold(default, |a, b| (a.0 + b.0, a.1.max(b.1)))
+                })
+                .unwrap_or(default),
         }
     }
 }
@@ -391,7 +410,7 @@ impl Display for ProjectTargetAnalysis {
             .file_name()
             .unwrap_or_default()
             .to_string_lossy();
-        let path = pretty_format_path(&std::fs::canonicalize(&self.project_path).unwrap());
+        let path = pretty_format_path(&canonicalize_or_not(&self.project_path));
 
         let last_modified: chrono::DateTime<chrono::Local> = self.last_modified.into();
         write!(
