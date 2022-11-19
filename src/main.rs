@@ -59,11 +59,13 @@ struct AppArgs {
     #[arg(short = 'v', long = "verbose")]
     verbose: bool,
 
-    /// Disable the interactive project selection
-    #[arg(short = 'n', long = "non-interactive")]
-    non_interactive: bool,
+    /// Use the interactive project selection. This will show a selection of all cleanable projects
+    /// with the possibility to manually select or deselect
+    #[arg(short = 'i', long = "interactive")]
+    interactive: bool,
 
-    /// Directories that should be ignored by default, including subdirectories
+    /// Directories that should be ignored by default, including subdirectories. This will still
+    /// detect the projects in those directories, but mark them to not be cleaned
     #[arg(long = "ignore")]
     ignore: Vec<String>,
 }
@@ -162,7 +164,7 @@ fn main() {
 
     scan_progress.finish_and_clear();
 
-    if !args.non_interactive {
+    if args.interactive {
         let Ok(Some(prompt)) = dialoguer::MultiSelect::new()
             .items(&projects)
             .with_prompt("Select projects to clean")

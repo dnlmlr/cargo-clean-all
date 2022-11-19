@@ -6,7 +6,7 @@
 I was a bit shocked when I realized that my rust target directories took up a total of over 50gb, 
 so I developed this tool to help me clean up all the project target dirs. There is already 
 [cargo-clean-recursive](https://github.com/IgaguriMK/cargo-clean-recursive) which unfortunately 
-doesn't support keeping interactive selections or recent files in order to not slow down the 
+doesn't support interactive selections or keeping recent files in order to not slow down the 
 projects I'm currently working on.
 
 ## What does it do
@@ -32,25 +32,29 @@ cargo install cargo-clean-all
 ## Usage
 
 Clean all projects in the current working directory with the possibility to 
-interactively deselect projects. (Interactive mode is enabled by default)
+interactively deselect projects
 ```
-cargo clean-all
+cargo clean-all -i
 ```
 
 Clean all projects in the home directory (and subdirectories) that haven't been compiled in the 
-last 7 days.
+last 7 days without interactive mode. This will still show the projects and ask for confirmation, 
+but won't show the manual selection dialog
 ```
 cargo clean-all --keep-days 7 ~
 ```
 
-Clean all projects in the home directory (and subdirectories) that take up more than 10MB.
+Clean all projects in the home directory (and subdirectories) that take up more than 10MB with 
+interactive mode.
 ```
-cargo clean-all --keep-size 10MB ~
+cargo clean-all -i --keep-size 10MB ~
 ```
 
-Clean all projects in the home directory (and subdirectories), excluding the Download and Documents directories.
+Clean all projects in the home directory (and subdirectories), excluding the Download and Documents 
+directories. Since interactive mode is used, the projects in the ignored directories may still be
+manually added to the cleanup run.
 ```
-cargo clean-all --ignore ~/Downloads --ignore ~/Documents ~
+cargo clean-all -i --ignore ~/Downloads --ignore ~/Documents ~
 ```
 
 # Alternatives
@@ -91,8 +95,8 @@ Options:
       --dry-run            Just collect the cleanable projects and list the freeable space, but don't delete anything
   -t, --threads <THREADS>  The number of threads to use for directory scaning. 0 automatically selects the number of threads [default: 0]
   -v, --verbose            Show access errors that occur while scanning. By default those errors are hidden
-  -n, --non-interactive    Disable the interactive project selection
-      --ignore <IGNORE>    Directories that should be ignored by default, including subdirectories
+  -i, --interactive        Use the interactive project selection. This will show a selection of all cleanable projects with the possibility to manually select or deselect
+      --ignore <IGNORE>    Directories that should be ignored by default, including subdirectories. This will still detect the projects in those directories, but mark them to not be cleaned
   -h, --help               Print help information
   -V, --version            Print version information
 ```
