@@ -7,6 +7,7 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, SystemTime},
 };
+use is_executable::is_executable;
 
 #[derive(Debug, Parser)]
 #[clap(author, version, about, bin_name = "cargo clean-all", long_about = None)]
@@ -68,6 +69,11 @@ struct AppArgs {
     /// detect the projects in those directories, but mark them to not be cleaned
     #[arg(long = "ignore")]
     ignore: Vec<String>,
+
+    /// Keeping compiled executables in release, debug and cross-compilation directories.
+    /// Moves the executable to a new folder outside of target.
+    #[arg(short = 'e', long = "keep-executable")]
+    executable: bool,
 }
 
 /// Wrap the bytefmt::parse function to return the error as an owned String
@@ -232,6 +238,44 @@ fn main() {
                 .unwrap()
                 .progress_chars("=> "),
         );
+
+    // Saves the executables in another folder before cleaning the target folder
+    if args.executable {
+        // Iterates over all files
+        for file in selected.clone() {
+
+            let mut path = pretty_format_path(&canonicalize_or_not(file.project_path));
+            path.push_str(r"/target");
+            let folderpath = Path::new(&path);
+            for entry in std::fs::read_dir(folderpath).unwrap() {
+                let entry = entry.unwrap();
+                let path1 = entry.path();
+
+                // dives deeper into directories
+                if path1.is_dir() {
+                    for entry2 in std::fs::read_dir(path1).unwrap() {
+                        let entry2 = entry2.unwrap();
+                        let path2 = entry2.path();
+                        // Checks if there is an executable file in the first directory under target, so debug, release, cross...
+                        if is_executable(&path2) {
+                            let mut path3 = path2.clone();
+                            path3.pop();
+                            let path4 = path3.to_string_lossy().replace("target", "executables");
+
+                            // creates a directory with the same name as where the original executable was located in, but with 'target' replaced by 'executable'
+                            std::fs::create_dir_all(path4)
+                                .expect("Couldn't create a folder for the executables");
+                            let subdirectories =
+                                path2.to_string_lossy().replace("target", "executables");
+                            // Moves the executables
+                            std::fs::rename(path2, subdirectories)
+                                .expect("Couldn't move executables");
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     let failed_cleanups = selected
         .iter()
