@@ -2,12 +2,12 @@ use clap::Parser;
 use colored::{Color, Colorize};
 use crossbeam_channel::Sender;
 use indicatif::{ProgressBar, ProgressStyle};
+use is_executable::is_executable;
 use std::{
     fmt::Display,
     path::{Path, PathBuf},
     time::{Duration, SystemTime},
 };
-use is_executable::is_executable;
 
 #[derive(Debug, Parser)]
 #[clap(author, version, about, bin_name = "cargo clean-all", long_about = None)]
@@ -241,37 +241,55 @@ fn main() {
 
     // Saves the executables in another folder before cleaning the target folder
     if args.executable {
-        // Iterates over all files
-        for file in selected.clone() {
+        for project in selected.iter() {
+            let project_target_path = &project.project_path.join("target");
 
-            let mut path = pretty_format_path(&canonicalize_or_not(file.project_path));
-            path.push_str(r"/target");
-            let folderpath = Path::new(&path);
-            for entry in std::fs::read_dir(folderpath).unwrap() {
-                let entry = entry.unwrap();
-                let path1 = entry.path();
+            let target_rd = match project_target_path.read_dir() {
+                Ok(it) => it,
+                Err(e) => {
+                    args.verbose
+                        .then(|| eprintln!("Error reading target dir of: '{}'  {}", project, e));
+                    continue;
+                }
+            };
 
-                // dives deeper into directories
-                if path1.is_dir() {
-                    for entry2 in std::fs::read_dir(path1).unwrap() {
-                        let entry2 = entry2.unwrap();
-                        let path2 = entry2.path();
-                        // Checks if there is an executable file in the first directory under target, so debug, release, cross...
-                        if is_executable(&path2) {
-                            let mut path3 = path2.clone();
-                            path3.pop();
-                            let path4 = path3.to_string_lossy().replace("target", "executables");
+            let target_rd = target_rd
+                .filter_map(|it| it.ok())
+                .filter_map(|it| it.path().is_dir().then(|| it.path()));
 
-                            // creates a directory with the same name as where the original executable was located in, but with 'target' replaced by 'executable'
-                            std::fs::create_dir_all(path4)
-                                .expect("Couldn't create a folder for the executables");
-                            let subdirectories =
-                                path2.to_string_lossy().replace("target", "executables");
-                            // Moves the executables
-                            std::fs::rename(path2, subdirectories)
-                                .expect("Couldn't move executables");
-                        }
+            for target_subdir in target_rd {
+                let files = match target_subdir.read_dir() {
+                    Ok(it) => it,
+                    Err(e) => {
+                        args.verbose.then(|| {
+                            eprintln!("Error reading target dir of: '{}'  {}", project, e)
+                        });
+                        continue;
                     }
+                };
+
+                let files = files
+                    .filter_map(|it| it.ok())
+                    .filter_map(|it| it.path().is_file().then(|| it.path()));
+
+                for exe_file_path in files.filter(|file| is_executable(file)) {
+                    let new_exe_file_path = exe_file_path
+                        .to_str()
+                        .expect("Failed to convert executable path to string")
+                        // TODO: This will break if the project path or executable contains "target"
+                        .replace("target", "executables");
+
+                    let new_exe_file_path = Path::new(&new_exe_file_path);
+
+                    // Creates a directory with the same name as where the original executable was
+                    // located in, but with 'target' replaced by 'executable'
+                    // TODO: Don't panic
+                    std::fs::create_dir_all(new_exe_file_path.parent().unwrap())
+                        .expect("Couldn't create a folder for the executables");
+
+                    // TODO: Don't panic
+                    std::fs::rename(exe_file_path, new_exe_file_path)
+                        .expect("Couldn't move executables");
                 }
             }
         }
