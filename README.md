@@ -74,6 +74,7 @@ cargo clean-all -i --ignore ~/Downloads --ignore ~/Documents ~
 | Interactive selection of projects              | yes | no  |
 | Clean only `release`, `debug` or `docs`        | no (not yet)  | yes |
 | Real `cargo clean` command under the hood      | no  | yes |
+| Keep executables in an extra directory         | yes | no  |
 
 Note that `cargo-clean-recursive` uses the actual `cargo clean` command under the hood instead of 
 simply deleting the target directories. This gies makes the cleaning work exactly as intended by 
@@ -98,7 +99,9 @@ Options:
   -t, --threads <THREADS>  The number of threads to use for directory scaning. 0 automatically selects the number of threads [default: 0]
   -v, --verbose            Show access errors that occur while scanning. By default those errors are hidden
   -i, --interactive        Use the interactive project selection. This will show a selection of all cleanable projects with the possibility to manually select or deselect
-      --ignore <IGNORE>    Directories that should be ignored by default, including subdirectories. This will still detect the projects in those directories, but mark them to not be cleaned
+      --ignore <IGNORE>    Directories that should be ignored by default, including subdirectories. This will still detect the projects in those directories, but mark them to not be cleaned. To actually skip scanning directories, use --skip instead. The directories can be specified as absolute paths or relative to the workdir
+  -e, --keep-executable    Keeping compiled executables in release, debug and cross-compilation directories. Moves the executable to a new folder outside of target
+      --skip <SKIP>        Directories that should be fully skipped during scanning, including subdirectories. This will speed up the scanning time by not doing any reads for the specified directories. The directories can be specified as absolute paths or relative to the workdir
   -h, --help               Print help information
   -V, --version            Print version information
 ```

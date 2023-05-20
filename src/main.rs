@@ -67,7 +67,9 @@ struct AppArgs {
     interactive: bool,
 
     /// Directories that should be ignored by default, including subdirectories. This will still
-    /// detect the projects in those directories, but mark them to not be cleaned
+    /// detect the projects in those directories, but mark them to not be cleaned. To actually skip
+    /// scanning directories, use --skip instead.
+    /// The directories can be specified as absolute paths or relative to the workdir.
     #[arg(long = "ignore")]
     ignore: Vec<String>,
 
@@ -78,6 +80,7 @@ struct AppArgs {
 
     /// Directories that should be fully skipped during scanning, including subdirectories. This
     /// will speed up the scanning time by not doing any reads for the specified directories.
+    /// The directories can be specified as absolute paths or relative to the workdir.
     #[arg(long = "skip")]
     skip: Vec<String>,
 }
