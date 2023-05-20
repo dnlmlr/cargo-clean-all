@@ -243,6 +243,7 @@ fn main() {
     if args.executable {
         for project in selected.iter() {
             let project_target_path = &project.project_path.join("target");
+            let project_executables_path = project.project_path.join("executables");
 
             let target_rd = match project_target_path.read_dir() {
                 Ok(it) => it,
@@ -273,23 +274,29 @@ fn main() {
                     .filter_map(|it| it.path().is_file().then(|| it.path()));
 
                 for exe_file_path in files.filter(|file| is_executable(file)) {
-                    let new_exe_file_path = exe_file_path
-                        .to_str()
-                        .expect("Failed to convert executable path to string")
-                        // TODO: This will break if the project path or executable contains "target"
-                        .replace("target", "executables");
+                    let new_exe_file_path = project_executables_path
+                        .join(target_subdir.file_name().expect("Path Error"))
+                        .join(exe_file_path.file_name().expect("Path Error"));
 
-                    let new_exe_file_path = Path::new(&new_exe_file_path);
+                    if let Err(e) =
+                        std::fs::create_dir_all(new_exe_file_path.parent().expect("Path Error"))
+                    {
+                        eprintln!(
+                            "Error createing executable dir: '{}'  {}",
+                            new_exe_file_path.parent().expect("Path Error").display(),
+                            e
+                        );
+                        continue;
+                    }
 
-                    // Creates a directory with the same name as where the original executable was
-                    // located in, but with 'target' replaced by 'executable'
-                    // TODO: Don't panic
-                    std::fs::create_dir_all(new_exe_file_path.parent().unwrap())
-                        .expect("Couldn't create a folder for the executables");
-
-                    // TODO: Don't panic
-                    std::fs::rename(exe_file_path, new_exe_file_path)
-                        .expect("Couldn't move executables");
+                    if let Err(e) = std::fs::rename(exe_file_path, &new_exe_file_path) {
+                        eprintln!(
+                            "Error moving executable: '{}'  {}",
+                            new_exe_file_path.display(),
+                            e
+                        );
+                        continue;
+                    }
                 }
             }
         }
