@@ -6,6 +6,7 @@ use is_executable::is_executable;
 use std::{
     fmt::Display,
     path::{Path, PathBuf},
+    thread,
     time::{Duration, SystemTime},
 };
 
@@ -74,6 +75,11 @@ struct AppArgs {
     /// Moves the executable to a new folder outside of target.
     #[arg(short = 'e', long = "keep-executable")]
     executable: bool,
+
+    /// Directories that should be fully skipped during scanning, including subdirectories. This
+    /// will speed up the scanning time by not doing any reads for the specified directories.
+    #[arg(long = "skip")]
+    skip: Vec<String>,
 }
 
 /// Wrap the bytefmt::parse function to return the error as an owned String
@@ -142,7 +148,7 @@ fn main() {
     scan_progress.enable_steady_tick(Duration::from_millis(100));
 
     // Find project dirs and analyze them
-    let mut projects: Vec<_> = find_cargo_projects(scan_path, args.number_of_threads, args.verbose)
+    let mut projects: Vec<_> = find_cargo_projects(scan_path, args.number_of_threads, &args)
         .into_iter()
         .filter_map(|proj| proj.1.then(|| ProjectTargetAnalysis::analyze(&proj.0)))
         .collect();
@@ -339,41 +345,43 @@ struct ProjectDir(PathBuf, bool);
 /// Recursively scan the given path for cargo projects using the specified number of threads.
 ///
 /// When the number of threads is 0, use as many threads as virtual CPU cores.
-fn find_cargo_projects(path: &Path, mut num_threads: usize, verbose: bool) -> Vec<ProjectDir> {
+fn find_cargo_projects(path: &Path, mut num_threads: usize, args: &AppArgs) -> Vec<ProjectDir> {
     if num_threads == 0 {
         num_threads = num_cpus::get();
     }
 
-    {
-        let (job_tx, job_rx) = crossbeam_channel::unbounded::<Job>();
-        let (result_tx, result_rx) = crossbeam_channel::unbounded::<ProjectDir>();
+    thread::scope(|scope| {
+        {
+            let (job_tx, job_rx) = crossbeam_channel::unbounded::<Job>();
+            let (result_tx, result_rx) = crossbeam_channel::unbounded::<ProjectDir>();
 
-        (0..num_threads)
-            .map(|_| (job_rx.clone(), result_tx.clone()))
-            .for_each(|(job_rx, result_tx)| {
-                std::thread::spawn(move || {
-                    job_rx
-                        .into_iter()
-                        .for_each(|job| find_cargo_projects_task(job, result_tx.clone(), verbose))
+            (0..num_threads)
+                .map(|_| (job_rx.clone(), result_tx.clone()))
+                .for_each(|(job_rx, result_tx)| {
+                    scope.spawn(move || {
+                        job_rx
+                            .into_iter()
+                            .for_each(|job| find_cargo_projects_task(job, result_tx.clone(), &args))
+                    });
                 });
-            });
 
-        job_tx
-            .clone()
-            .send(Job(path.to_path_buf(), job_tx))
-            .unwrap();
+            job_tx
+                .clone()
+                .send(Job(path.to_path_buf(), job_tx))
+                .unwrap();
 
-        result_rx
-    }
-    .into_iter()
-    .collect()
+            result_rx
+        }
+        .into_iter()
+        .collect()
+    })
 }
 
 /// Scan the given directory and report to the results Sender if the directory contains a
 /// Cargo.toml . Detected subdirectories should be queued as a new job in with the job_sender.
 ///
 /// This function is supposed to be called by the threadpool in find_cargo_projects
-fn find_cargo_projects_task(job: Job, results: Sender<ProjectDir>, verbose: bool) {
+fn find_cargo_projects_task(job: Job, results: Sender<ProjectDir>, args: &AppArgs) {
     let path = job.0;
     let job_sender = job.1;
     let mut has_target = false;
@@ -381,7 +389,8 @@ fn find_cargo_projects_task(job: Job, results: Sender<ProjectDir>, verbose: bool
     let read_dir = match path.read_dir() {
         Ok(it) => it,
         Err(e) => {
-            verbose.then(|| eprintln!("Error reading directory: '{}'  {}", path.display(), e));
+            args.verbose
+                .then(|| eprintln!("Error reading directory: '{}'  {}", path.display(), e));
             return;
         }
     };
@@ -396,6 +405,10 @@ fn find_cargo_projects_task(job: Job, results: Sender<ProjectDir>, verbose: bool
 
     // Iterate through the subdirectories of path, ignoring entries that caused errors
     for it in dirs {
+        if args.skip.iter().any(|p| starts_with_canonicalized(&it, p)) {
+            continue;
+        }
+
         let filename = it.file_name().unwrap_or_default().to_string_lossy();
         match filename.as_ref() {
             // No need to search .git directories for cargo projects. Also skip .cargo directories
