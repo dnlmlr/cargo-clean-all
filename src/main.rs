@@ -100,7 +100,7 @@ fn main() {
     // If the program is interrupted while in a dialog the cursor stays hidden. This makes sure
     // that the cursor is shown when interrupting the program
     ctrlc::set_handler(|| {
-        dialoguer::console::Term::stdout().show_cursor().unwrap();
+        let _ = dialoguer::console::Term::stdout().show_cursor();
         std::process::exit(1);
     })
     .unwrap();
@@ -223,15 +223,16 @@ fn main() {
     }
 
     // Confirm cleanup if --yes is not present in the args
-    if !args.yes
-        && !dialoguer::Confirm::new()
+    if !args.yes {
+        if !dialoguer::Confirm::new()
             .with_prompt("Clean the project directories shown above?")
             .wait_for_newline(true)
             .interact()
             .unwrap()
-    {
-        println!("Cleanup cancelled");
-        return;
+        {
+            println!("Cleanup cancelled");
+            return;
+        }
     }
 
     println!("Starting cleanup...");
