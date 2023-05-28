@@ -47,7 +47,7 @@ struct AppArgs {
     #[arg(long = "dry-run")]
     dry_run: bool,
 
-    /// The number of threads to use for directory scaning. 0 automatically selects the number of
+    /// The number of threads to use for directory scanning. 0 automatically selects the number of
     /// threads
     #[arg(
         short = 't',
@@ -125,7 +125,7 @@ fn main() {
     let scan_path = Path::new(&args.root_dir);
 
     let scan_progress = ProgressBar::new_spinner()
-        .with_message(format!("Scaning for projects in {}", args.root_dir))
+        .with_message(format!("Scanning for projects in {}", args.root_dir))
         .with_style(ProgressStyle::default_spinner().tick_strings(&[
             "[=---------]",
             "[-=--------]",
