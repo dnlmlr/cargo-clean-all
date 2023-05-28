@@ -96,7 +96,7 @@ Options:
   -s, --keep-size <SIZE>   Ignore projects with a target dir size smaller than the specified value. The size can be specified using binary prefixes like "10MB" for 10_000_000 bytes, or "1KiB" for 1_024 bytes [default: 0]
   -d, --keep-days <DAYS>   Ignore projects that have been compiled in the last [DAYS] days. The last compilation time is infered by the last modified time of the contents of target directory [default: 0]
       --dry-run            Just collect the cleanable projects and list the freeable space, but don't delete anything
-  -t, --threads <THREADS>  The number of threads to use for directory scaning. 0 automatically selects the number of threads [default: 0]
+  -t, --threads <THREADS>  The number of threads to use for directory scanning. 0 automatically selects the number of threads [default: 0]
   -v, --verbose            Show access errors that occur while scanning. By default those errors are hidden
   -i, --interactive        Use the interactive project selection. This will show a selection of all cleanable projects with the possibility to manually select or deselect
       --ignore <IGNORE>    Directories that should be ignored by default, including subdirectories. This will still detect the projects in those directories, but mark them to not be cleaned. To actually skip scanning directories, use --skip instead. The directories can be specified as absolute paths or relative to the workdir
