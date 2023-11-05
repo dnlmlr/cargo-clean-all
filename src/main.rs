@@ -266,7 +266,7 @@ fn main() {
 
             let target_rd = target_rd
                 .filter_map(|it| it.ok())
-                .filter_map(|it| it.path().is_dir().then(|| it.path()));
+                .filter_map(|it| it.file_type().is_ok_and(|t| t.is_dir()).then(|| it.path()));
 
             for target_subdir in target_rd {
                 let files = match target_subdir.read_dir() {
@@ -281,7 +281,7 @@ fn main() {
 
                 let files = files
                     .filter_map(|it| it.ok())
-                    .filter_map(|it| it.path().is_file().then(|| it.path()));
+                    .filter_map(|it| it.file_type().is_ok_and(|t| t.is_file()).then(|| it.path()));
 
                 for exe_file_path in files.filter(|file| is_executable(file)) {
                     let new_exe_file_path = project_executables_path
@@ -400,8 +400,10 @@ fn find_cargo_projects_task(job: Job, results: Sender<ProjectDir>, args: &AppArg
     };
 
     let (dirs, files): (Vec<_>, Vec<_>) = read_dir
-        .filter_map(|it| it.ok().map(|it| it.path()))
-        .partition(|it| it.is_dir());
+        .filter_map(|it| it.ok())
+        .partition(|it| it.file_type().is_ok_and(|t| t.is_dir()));
+    let dirs: Vec<_> = dirs.iter().map(|it| it.path()).collect();
+    let files: Vec<_> = files.iter().map(|it| it.path()).collect();
 
     let has_cargo_toml = files
         .iter()
