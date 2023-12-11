@@ -9,6 +9,7 @@ use std::{
     thread,
     time::{Duration, SystemTime},
 };
+use walkdir::WalkDir;
 
 #[derive(Debug, Parser)]
 #[clap(author, version, about, bin_name = "cargo clean-all", long_about = None)]
@@ -450,35 +451,22 @@ struct ProjectTargetAnalysis {
 impl ProjectTargetAnalysis {
     /// Analyze a given project directories target directory
     pub fn analyze(path: &Path) -> Self {
-        let (size, last_modified) = Self::recursive_scan_target(&path.join("target"));
+        let (mut size, mut last_modified) = (0, SystemTime::UNIX_EPOCH);
+        for entry in WalkDir::new(&path.join("target"))
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+        {
+            if let Ok(md) = entry.metadata() {
+                size += md.len();
+                last_modified = last_modified.max(md.modified().unwrap_or(last_modified));
+            }
+        }
         Self {
             project_path: path.to_owned(),
             size,
             last_modified,
             selected_for_cleanup: false,
-        }
-    }
-
-    // Recursively sum up the file sizes and find the last modified timestamp
-    fn recursive_scan_target<T: AsRef<Path>>(path: T) -> (u64, SystemTime) {
-        let path = path.as_ref();
-
-        let default = (0, SystemTime::UNIX_EPOCH);
-
-        if !path.exists() {
-            return default;
-        }
-
-        match (path.is_file(), path.metadata()) {
-            (true, Ok(md)) => (md.len(), md.modified().unwrap_or(default.1)),
-            _ => path
-                .read_dir()
-                .map(|rd| {
-                    rd.filter_map(|it| it.ok().map(|it| it.path()))
-                        .map(Self::recursive_scan_target)
-                        .fold(default, |a, b| (a.0 + b.0, a.1.max(b.1)))
-                })
-                .unwrap_or(default),
         }
     }
 }
