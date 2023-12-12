@@ -1,13 +1,13 @@
 use clap::Parser;
 use colored::{Color, Colorize};
 use crossbeam_channel::{SendError, Sender};
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use is_executable::is_executable;
 use std::{
     fmt::Display,
     path::{Path, PathBuf},
     thread,
-    time::{Duration, SystemTime},
+    time::SystemTime,
 };
 
 #[derive(Debug, Parser)]
@@ -129,35 +129,15 @@ fn main() {
     let args = AppArgs::parse_from(args);
 
     let scan_path = Path::new(&args.root_dir);
-
-    let scan_progress = ProgressBar::new_spinner()
-        .with_message(format!("Scanning for projects in {}", args.root_dir))
-        .with_style(ProgressStyle::default_spinner().tick_strings(&[
-            "[=---------]",
-            "[-=--------]",
-            "[--=-------]",
-            "[---=------]",
-            "[----=-----]",
-            "[-----=----]",
-            "[------=---]",
-            "[-------=--]",
-            "[--------=-]",
-            "[---------=]",
-            "[--------=-]",
-            "[-------=--]",
-            "[------=---]",
-            "[-----=----]",
-            "[----=-----]",
-            "[---=------]",
-            "[--=-------]",
-            "[-=--------]",
-            "[=---------]",
-        ]));
-
-    scan_progress.enable_steady_tick(Duration::from_millis(100));
+    println!("Scanning for projects in {}", args.root_dir);
+    let multi_progress = MultiProgress::new();
 
     // Find project dirs and analyze them
-    let mut projects: Vec<_> = find_cargo_projects(scan_path, args.number_of_threads, &args)
+    let cargo_projects: Vec<_> =
+        find_cargo_projects(scan_path, &multi_progress, args.number_of_threads, &args);
+
+    multi_progress.clear().unwrap();
+    let mut projects: Vec<_> = cargo_projects
         .into_iter()
         .filter_map(|proj| proj.1.then(|| ProjectTargetAnalysis::analyze(&proj.0)))
         .collect();
@@ -182,8 +162,6 @@ fn main() {
             days_elapsed >= args.keep_last_modified as f32 && tgt.size > args.keep_size && !ignored
         })
         .collect::<Vec<_>>();
-
-    scan_progress.finish_and_clear();
 
     if args.interactive {
         let Ok(Some(prompt)) = dialoguer::MultiSelect::new()
@@ -375,10 +353,25 @@ impl Job {
 /// Directory of the project and bool that is true if the target directory exists
 struct ProjectDir(PathBuf, bool);
 
+fn progress_bar(multi_progress: &MultiProgress, i: usize, num_threads: usize) -> ProgressBar {
+    let spinner_style = ProgressStyle::with_template("{prefix:.bold.dim} {spinner} {wide_msg}")
+        .unwrap()
+        .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ");
+    let pb = multi_progress.add(ProgressBar::new(u64::MAX)); // unbounded
+    pb.set_style(spinner_style.clone());
+    pb.set_prefix(format!("[{}/{num_threads}]", i + 1));
+    pb
+}
+
 /// Recursively scan the given path for cargo projects using the specified number of threads.
 ///
 /// When the number of threads is 0, use as many threads as virtual CPU cores.
-fn find_cargo_projects(path: &Path, mut num_threads: usize, args: &AppArgs) -> Vec<ProjectDir> {
+fn find_cargo_projects(
+    path: &Path,
+    multi_progress: &MultiProgress,
+    mut num_threads: usize,
+    args: &AppArgs,
+) -> Vec<ProjectDir> {
     if num_threads == 0 {
         num_threads = num_cpus::get();
     }
@@ -390,12 +383,14 @@ fn find_cargo_projects(path: &Path, mut num_threads: usize, args: &AppArgs) -> V
             let (result_tx, result_rx) = crossbeam_channel::unbounded::<ProjectDir>();
 
             (0..num_threads)
-                .map(|_| (job_rx.clone(), result_tx.clone()))
-                .for_each(|(job_rx, result_tx)| {
+                .map(|i| (i, job_rx.clone(), result_tx.clone()))
+                .for_each(|(i, job_rx, result_tx)| {
                     scope.spawn(move || {
-                        job_rx
-                            .into_iter()
-                            .for_each(|job| find_cargo_projects_task(job, result_tx.clone(), &args))
+                        let pb = progress_bar(multi_progress, i, num_threads);
+                        job_rx.into_iter().for_each(|job| {
+                            find_cargo_projects_task(job, &pb, result_tx.clone(), &args)
+                        });
+                        pb.finish_with_message("waiting...");
                     });
                 });
 
@@ -415,11 +410,19 @@ fn find_cargo_projects(path: &Path, mut num_threads: usize, args: &AppArgs) -> V
 /// Cargo.toml . Detected subdirectories should be queued as a new job in with the job_sender.
 ///
 /// This function is supposed to be called by the threadpool in find_cargo_projects
-fn find_cargo_projects_task(job: Job, results: Sender<ProjectDir>, args: &AppArgs) {
+fn find_cargo_projects_task(
+    job: Job,
+    pb: &ProgressBar,
+    results: Sender<ProjectDir>,
+    args: &AppArgs,
+) {
     if let Some(0) = job.depth {
         return;
     }
     let mut has_target = false;
+
+    pb.set_message(format!("looking at: {}", job.path.display()));
+    pb.inc(1);
 
     let read_dir = match job.path.read_dir() {
         Ok(it) => it,
@@ -458,6 +461,8 @@ fn find_cargo_projects_task(job: Job, results: Sender<ProjectDir>, args: &AppArg
     if has_cargo_toml {
         results.send(ProjectDir(job.path, has_target)).unwrap();
     }
+    pb.set_message("waiting...");
+    pb.inc(1);
 }
 
 #[derive(Clone, Debug)]
