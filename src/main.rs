@@ -297,22 +297,19 @@ fn main() {
         }
     }
 
-    let failed_cleanups = selected
-        .iter()
-        .filter_map(|tgt| {
-            clean_progress.inc(1);
-            remove_dir_all::remove_dir_all(&tgt.project_path.join("target"))
-                .err()
-                .map(|e| (tgt.clone(), e))
-        })
-        .collect::<Vec<_>>();
+    let failed_cleanups = selected.iter().filter_map(|tgt| {
+        clean_progress.inc(1);
+        remove_dir_all::remove_dir_all(&tgt.project_path.join("target"))
+            .err()
+            .map(|e| (tgt.clone(), e))
+    });
 
     clean_progress.finish();
 
     // The current leftover size calculation assumes that a failed deletion didn't delete anything.
     // This will not be true in most cases as a recursive deletion might delet stuff before failing.
     let mut leftover_size = 0;
-    for (tgt, e) in &failed_cleanups {
+    for (tgt, e) in failed_cleanups {
         leftover_size += tgt.size;
         println!("Failed to clean {}", pretty_format_path(&tgt.project_path));
         println!("Error: {}", e);
