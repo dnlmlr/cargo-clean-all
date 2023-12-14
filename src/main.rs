@@ -134,13 +134,30 @@ fn main() {
 
     // Find project dirs and analyze them
     let cargo_projects: Vec<_> =
-        find_cargo_projects(scan_path, &multi_progress, args.number_of_threads, &args);
-
+        find_cargo_projects(scan_path, &multi_progress, args.number_of_threads, &args)
+            .filter(|d| d.1)
+            .collect();
     multi_progress.clear().unwrap();
+
+    let pb = ProgressBar::new(cargo_projects.len() as u64);
+    println!("Computing size of target/ for project");
+    pb.set_style(
+        ProgressStyle::with_template("[{elapsed}] [{bar:.cyan/blue}] {pos}/{len}: {msg}")
+            .expect("Invalid template syntax")
+            .progress_chars("#>-"),
+    );
     let mut projects: Vec<_> = cargo_projects
         .into_iter()
-        .filter_map(|proj| proj.1.then(|| ProjectTargetAnalysis::analyze(&proj.0)))
+        .filter_map(|proj| {
+            proj.1.then(|| {
+                pb.set_message(format!("{}", proj.0.display()));
+                let analysis = ProjectTargetAnalysis::analyze(&proj.0);
+                pb.inc(1);
+                analysis
+            })
+        })
         .collect();
+    pb.finish_and_clear();
 
     projects.sort_by_key(|proj| proj.size);
 
@@ -352,7 +369,7 @@ struct ProjectDir(PathBuf, bool);
 
 fn progress_bar(multi_progress: &MultiProgress, i: usize, num_threads: usize) -> ProgressBar {
     let spinner_style = ProgressStyle::with_template("{prefix:.bold.dim} {spinner} {wide_msg}")
-        .unwrap()
+        .expect("Invalid template syntax")
         .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ");
     let pb = multi_progress.add(ProgressBar::new(u64::MAX)); // unbounded
     pb.set_style(spinner_style.clone());
@@ -368,7 +385,7 @@ fn find_cargo_projects(
     multi_progress: &MultiProgress,
     mut num_threads: usize,
     args: &AppArgs,
-) -> Vec<ProjectDir> {
+) -> impl Iterator<Item = ProjectDir> {
     if num_threads == 0 {
         num_threads = num_cpus::get();
     }
@@ -399,7 +416,6 @@ fn find_cargo_projects(
             result_rx
         }
         .into_iter()
-        .collect()
     })
 }
 
