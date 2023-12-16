@@ -1,6 +1,6 @@
 use clap::Parser;
 use colored::{Color, Colorize};
-use crossbeam_channel::Sender;
+use crossbeam_channel::{SendError, Sender};
 use indicatif::{ProgressBar, ProgressStyle};
 use is_executable::is_executable;
 use std::{
@@ -83,6 +83,12 @@ struct AppArgs {
     /// The directories can be specified as absolute paths or relative to the workdir.
     #[arg(long = "skip")]
     skip: Vec<String>,
+
+    /// Maximum depth of subdirectories that should be scanned looking for the **`target/`**. This will speed up the scanning
+    /// The option is for target/ dir, NOT for the project dir
+    /// 0 means no limit
+    #[arg(long = "depth", default_value_t = 0)]
+    depth: usize,
 }
 
 /// Wrap the bytefmt::parse function to return the error as an owned String
@@ -185,10 +191,11 @@ fn main() {
             .with_prompt("Select projects to clean")
             .report(false)
             .defaults(&preselected_projects)
-            .interact_opt() else {
-                println!("Nothing selected");
-                return;
-            };
+            .interact_opt()
+        else {
+            println!("Nothing selected");
+            return;
+        };
 
         for idx in prompt {
             projects[idx].selected_for_cleanup = true;
@@ -341,7 +348,29 @@ fn main() {
 
 /// Job for the threaded project finder. First the path to be searched, second the sender to create
 /// new jobs for recursively searching the dirs
-struct Job(PathBuf, Sender<Job>);
+struct Job {
+    path: PathBuf,
+    sender: Sender<Job>,
+    depth: Option<usize>,
+}
+
+impl Job {
+    pub fn new(path: PathBuf, sender: Sender<Job>, depth: Option<usize>) -> Self {
+        Self {
+            path,
+            sender,
+            depth,
+        }
+    }
+
+    pub fn explore_recursive(&self, path: PathBuf) -> Result<(), SendError<Self>> {
+        self.sender.send(Job {
+            path,
+            sender: self.sender.clone(),
+            depth: self.depth.map(|d| d - 1),
+        })
+    }
+}
 
 /// Directory of the project and bool that is true if the target directory exists
 struct ProjectDir(PathBuf, bool);
@@ -353,6 +382,7 @@ fn find_cargo_projects(path: &Path, mut num_threads: usize, args: &AppArgs) -> V
     if num_threads == 0 {
         num_threads = num_cpus::get();
     }
+    let depth = (args.depth > 0).then(|| args.depth);
 
     thread::scope(|scope| {
         {
@@ -371,7 +401,7 @@ fn find_cargo_projects(path: &Path, mut num_threads: usize, args: &AppArgs) -> V
 
             job_tx
                 .clone()
-                .send(Job(path.to_path_buf(), job_tx))
+                .send(Job::new(path.to_path_buf(), job_tx, depth))
                 .unwrap();
 
             result_rx
@@ -386,29 +416,26 @@ fn find_cargo_projects(path: &Path, mut num_threads: usize, args: &AppArgs) -> V
 ///
 /// This function is supposed to be called by the threadpool in find_cargo_projects
 fn find_cargo_projects_task(job: Job, results: Sender<ProjectDir>, args: &AppArgs) {
-    let path = job.0;
-    let job_sender = job.1;
+    if let Some(0) = job.depth {
+        return;
+    }
     let mut has_target = false;
 
-    let read_dir = match path.read_dir() {
+    let read_dir = match job.path.read_dir() {
         Ok(it) => it,
         Err(e) => {
             args.verbose
-                .then(|| eprintln!("Error reading directory: '{}'  {}", path.display(), e));
+                .then(|| eprintln!("Error reading directory: '{}'  {}", job.path.display(), e));
             return;
         }
     };
-
     let (dirs, files): (Vec<_>, Vec<_>) = read_dir
         .filter_map(|it| it.ok())
         .partition(|it| it.file_type().is_ok_and(|t| t.is_dir()));
-    let dirs: Vec<_> = dirs.iter().map(|it| it.path()).collect();
-    let files: Vec<_> = files.iter().map(|it| it.path()).collect();
-
+    let dirs = dirs.iter().map(|it| it.path());
     let has_cargo_toml = files
         .iter()
-        .any(|it| it.file_name().unwrap_or_default().to_string_lossy() == "Cargo.toml");
-
+        .any(|it| it.file_name().to_string_lossy() == "Cargo.toml");
     // Iterate through the subdirectories of path, ignoring entries that caused errors
     for it in dirs {
         if args.skip.iter().any(|p| starts_with_canonicalized(&it, p)) {
@@ -423,15 +450,13 @@ fn find_cargo_projects_task(job: Job, results: Sender<ProjectDir>, args: &AppArg
             ".git" | ".cargo" => (),
             "target" if has_cargo_toml => has_target = true,
             // For directories queue a new job to search it with the threadpool
-            _ => job_sender
-                .send(Job(it.to_path_buf(), job_sender.clone()))
-                .unwrap(),
+            _ => job.explore_recursive(it.to_path_buf()).unwrap(),
         }
     }
 
     // If path contains a Cargo.toml, it is a project directory
     if has_cargo_toml {
-        results.send(ProjectDir(path, has_target)).unwrap();
+        results.send(ProjectDir(job.path, has_target)).unwrap();
     }
 }
 
