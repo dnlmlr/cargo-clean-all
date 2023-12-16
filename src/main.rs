@@ -490,7 +490,7 @@ impl ProjectTargetAnalysis {
 
         let default = (0, SystemTime::UNIX_EPOCH);
 
-        if !path.exists() {
+        if !path.exists() || path.is_symlink() {
             return default;
         }
 
