@@ -238,7 +238,7 @@ fn main() {
             .with_prompt("Clean the project directories shown above?")
             .wait_for_newline(true)
             .interact()
-            .unwrap()
+            .unwrap_or(false)
         {
             println!("Cleanup cancelled");
             return;
