@@ -1,7 +1,7 @@
 use clap::Parser;
 use colored::{Color, Colorize};
 use crossbeam_channel::{SendError, Sender};
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use is_executable::is_executable;
 use std::{
     fmt::Display,
@@ -130,7 +130,11 @@ fn main() {
 
     let scan_path = Path::new(&args.root_dir);
     println!("Scanning for projects in {}", args.root_dir);
-    let multi_progress = MultiProgress::new();
+    let multi_progress = if args.verbose {
+        MultiProgress::with_draw_target(ProgressDrawTarget::stderr_with_hz(10))
+    } else {
+        MultiProgress::with_draw_target(ProgressDrawTarget::hidden())
+    };
 
     // Find project dirs and analyze them
     let cargo_projects: Vec<_> =
@@ -396,9 +400,8 @@ fn find_cargo_projects(
                 .map(|_| (job_rx.clone(), result_tx.clone()))
                 .for_each(|(job_rx, result_tx)| {
                     scope.spawn(move || {
-                        let spinner_style =
-                            ProgressStyle::with_template("{wide_msg}")
-                                .expect("Invalid template syntax");
+                        let spinner_style = ProgressStyle::with_template("{wide_msg}")
+                            .expect("Invalid template syntax");
                         let pb = progress_bar(multi_progress, spinner_style.clone());
                         job_rx.into_iter().for_each(|job| {
                             find_cargo_projects_task(job, &pb, result_tx.clone(), &args)
@@ -433,7 +436,9 @@ fn find_cargo_projects_task(
     }
     let mut has_target = false;
 
-    pb.set_message(format!("looking at: {}", job.path.display()));
+    if args.verbose {
+        pb.set_message(format!("looking at: {}", job.path.display()));
+    }
 
     let read_dir = match job.path.read_dir() {
         Ok(it) => it,
@@ -472,7 +477,9 @@ fn find_cargo_projects_task(
     if has_cargo_toml {
         results.send(ProjectDir(job.path, has_target)).unwrap();
     }
-    pb.set_message("waiting...");
+    if args.verbose {
+        pb.set_message("waiting...");
+    }
 }
 
 #[derive(Clone, Debug)]
