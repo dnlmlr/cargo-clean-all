@@ -367,13 +367,9 @@ impl Job {
 /// Directory of the project and bool that is true if the target directory exists
 struct ProjectDir(PathBuf, bool);
 
-fn progress_bar(multi_progress: &MultiProgress, i: usize, num_threads: usize) -> ProgressBar {
-    let spinner_style = ProgressStyle::with_template("{prefix:.bold.dim} {spinner} {wide_msg}")
-        .expect("Invalid template syntax")
-        .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ");
+fn progress_bar(multi_progress: &MultiProgress, spinner_style: ProgressStyle) -> ProgressBar {
     let pb = multi_progress.add(ProgressBar::new(u64::MAX)); // unbounded
-    pb.set_style(spinner_style.clone());
-    pb.set_prefix(format!("[{}/{num_threads}]", i + 1));
+    pb.set_style(spinner_style);
     pb
 }
 
@@ -397,10 +393,13 @@ fn find_cargo_projects(
             let (result_tx, result_rx) = crossbeam_channel::unbounded::<ProjectDir>();
 
             (0..num_threads)
-                .map(|i| (i, job_rx.clone(), result_tx.clone()))
-                .for_each(|(i, job_rx, result_tx)| {
+                .map(|_| (job_rx.clone(), result_tx.clone()))
+                .for_each(|(job_rx, result_tx)| {
                     scope.spawn(move || {
-                        let pb = progress_bar(multi_progress, i, num_threads);
+                        let spinner_style =
+                            ProgressStyle::with_template("{wide_msg}")
+                                .expect("Invalid template syntax");
+                        let pb = progress_bar(multi_progress, spinner_style.clone());
                         job_rx.into_iter().for_each(|job| {
                             find_cargo_projects_task(job, &pb, result_tx.clone(), &args)
                         });
