@@ -434,7 +434,6 @@ fn find_cargo_projects_task(
     let mut has_target = false;
 
     pb.set_message(format!("looking at: {}", job.path.display()));
-    pb.inc(1);
 
     let read_dir = match job.path.read_dir() {
         Ok(it) => it,
@@ -474,7 +473,6 @@ fn find_cargo_projects_task(
         results.send(ProjectDir(job.path, has_target)).unwrap();
     }
     pb.set_message("waiting...");
-    pb.inc(1);
 }
 
 #[derive(Clone, Debug)]
