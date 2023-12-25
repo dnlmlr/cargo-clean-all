@@ -7,7 +7,7 @@ use std::{
     fmt::Display,
     path::{Path, PathBuf},
     thread,
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 
 #[derive(Debug, Parser)]
@@ -129,19 +129,30 @@ fn main() {
     let args = AppArgs::parse_from(args);
 
     let scan_path = Path::new(&args.root_dir);
-    println!("Scanning for projects in {}", args.root_dir);
+
     let multi_progress = if args.verbose {
+        println!("Scanning for projects in {}", args.root_dir);
         MultiProgress::with_draw_target(ProgressDrawTarget::stderr_with_hz(10))
     } else {
         MultiProgress::with_draw_target(ProgressDrawTarget::hidden())
     };
+
+    let spinner = ProgressBar::new_spinner()
+        .with_message(format!("Scanning for projects in {}", args.root_dir))
+        .with_style(ProgressStyle::default_spinner());
+
+    if !args.verbose {
+        spinner.enable_steady_tick(Duration::from_millis(100));
+    }
 
     // Find project dirs and analyze them
     let cargo_projects: Vec<_> =
         find_cargo_projects(scan_path, &multi_progress, args.number_of_threads, &args)
             .filter(|d| d.1)
             .collect();
+
     multi_progress.clear().unwrap();
+    spinner.finish_and_clear();
 
     let pb = ProgressBar::new(cargo_projects.len() as u64);
     println!("Computing size of target/ for project");
@@ -150,6 +161,7 @@ fn main() {
             .expect("Invalid template syntax")
             .progress_chars("#>-"),
     );
+
     let mut projects: Vec<_> = cargo_projects
         .into_iter()
         .filter_map(|proj| {
@@ -161,6 +173,7 @@ fn main() {
             })
         })
         .collect();
+
     pb.finish_and_clear();
 
     projects.sort_by_key(|proj| proj.size);
@@ -443,8 +456,10 @@ fn find_cargo_projects_task(
     let read_dir = match job.path.read_dir() {
         Ok(it) => it,
         Err(e) => {
-            args.verbose
-                .then(|| eprintln!("Error reading directory: '{}'  {}", job.path.display(), e));
+            pb.suspend(|| {
+                args.verbose
+                    .then(|| eprintln!("Error reading directory: '{}'  {}", job.path.display(), e));
+            });
             return;
         }
     };
