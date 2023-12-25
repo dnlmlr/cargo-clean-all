@@ -1,13 +1,13 @@
 use clap::Parser;
 use colored::{Color, Colorize};
 use crossbeam_channel::{SendError, Sender};
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use is_executable::is_executable;
 use std::{
     fmt::Display,
     path::{Path, PathBuf},
     thread,
-    time::{Duration, SystemTime},
+    time::SystemTime,
 };
 
 #[derive(Debug, Parser)]
@@ -129,38 +129,39 @@ fn main() {
     let args = AppArgs::parse_from(args);
 
     let scan_path = Path::new(&args.root_dir);
-
-    let scan_progress = ProgressBar::new_spinner()
-        .with_message(format!("Scanning for projects in {}", args.root_dir))
-        .with_style(ProgressStyle::default_spinner().tick_strings(&[
-            "[=---------]",
-            "[-=--------]",
-            "[--=-------]",
-            "[---=------]",
-            "[----=-----]",
-            "[-----=----]",
-            "[------=---]",
-            "[-------=--]",
-            "[--------=-]",
-            "[---------=]",
-            "[--------=-]",
-            "[-------=--]",
-            "[------=---]",
-            "[-----=----]",
-            "[----=-----]",
-            "[---=------]",
-            "[--=-------]",
-            "[-=--------]",
-            "[=---------]",
-        ]));
-
-    scan_progress.enable_steady_tick(Duration::from_millis(100));
+    println!("Scanning for projects in {}", args.root_dir);
+    let multi_progress = if args.verbose {
+        MultiProgress::with_draw_target(ProgressDrawTarget::stderr_with_hz(10))
+    } else {
+        MultiProgress::with_draw_target(ProgressDrawTarget::hidden())
+    };
 
     // Find project dirs and analyze them
-    let mut projects: Vec<_> = find_cargo_projects(scan_path, args.number_of_threads, &args)
+    let cargo_projects: Vec<_> =
+        find_cargo_projects(scan_path, &multi_progress, args.number_of_threads, &args)
+            .filter(|d| d.1)
+            .collect();
+    multi_progress.clear().unwrap();
+
+    let pb = ProgressBar::new(cargo_projects.len() as u64);
+    println!("Computing size of target/ for project");
+    pb.set_style(
+        ProgressStyle::with_template("[{elapsed}] [{bar:.cyan/blue}] {pos}/{len}: {msg}")
+            .expect("Invalid template syntax")
+            .progress_chars("#>-"),
+    );
+    let mut projects: Vec<_> = cargo_projects
         .into_iter()
-        .filter_map(|proj| proj.1.then(|| ProjectTargetAnalysis::analyze(&proj.0)))
+        .filter_map(|proj| {
+            proj.1.then(|| {
+                pb.set_message(format!("{}", proj.0.display()));
+                let analysis = ProjectTargetAnalysis::analyze(&proj.0);
+                pb.inc(1);
+                analysis
+            })
+        })
         .collect();
+    pb.finish_and_clear();
 
     projects.sort_by_key(|proj| proj.size);
 
@@ -182,8 +183,6 @@ fn main() {
             days_elapsed >= args.keep_last_modified as f32 && tgt.size > args.keep_size && !ignored
         })
         .collect::<Vec<_>>();
-
-    scan_progress.finish_and_clear();
 
     if args.interactive {
         let Ok(Some(prompt)) = dialoguer::MultiSelect::new()
@@ -319,22 +318,19 @@ fn main() {
         }
     }
 
-    let failed_cleanups = selected
-        .iter()
-        .filter_map(|tgt| {
-            clean_progress.inc(1);
-            remove_dir_all::remove_dir_all(&tgt.project_path.join("target"))
-                .err()
-                .map(|e| (tgt.clone(), e))
-        })
-        .collect::<Vec<_>>();
+    let failed_cleanups = selected.iter().filter_map(|tgt| {
+        clean_progress.inc(1);
+        remove_dir_all::remove_dir_all(&tgt.project_path.join("target"))
+            .err()
+            .map(|e| (tgt.clone(), e))
+    });
 
     clean_progress.finish();
 
     // The current leftover size calculation assumes that a failed deletion didn't delete anything.
     // This will not be true in most cases as a recursive deletion might delet stuff before failing.
     let mut leftover_size = 0;
-    for (tgt, e) in &failed_cleanups {
+    for (tgt, e) in failed_cleanups {
         leftover_size += tgt.size;
         println!("Failed to clean {}", pretty_format_path(&tgt.project_path));
         println!("Error: {}", e);
@@ -375,10 +371,21 @@ impl Job {
 /// Directory of the project and bool that is true if the target directory exists
 struct ProjectDir(PathBuf, bool);
 
+fn progress_bar(multi_progress: &MultiProgress, spinner_style: ProgressStyle) -> ProgressBar {
+    let pb = multi_progress.add(ProgressBar::new(u64::MAX)); // unbounded
+    pb.set_style(spinner_style);
+    pb
+}
+
 /// Recursively scan the given path for cargo projects using the specified number of threads.
 ///
 /// When the number of threads is 0, use as many threads as virtual CPU cores.
-fn find_cargo_projects(path: &Path, mut num_threads: usize, args: &AppArgs) -> Vec<ProjectDir> {
+fn find_cargo_projects(
+    path: &Path,
+    multi_progress: &MultiProgress,
+    mut num_threads: usize,
+    args: &AppArgs,
+) -> impl Iterator<Item = ProjectDir> {
     if num_threads == 0 {
         num_threads = num_cpus::get();
     }
@@ -393,9 +400,13 @@ fn find_cargo_projects(path: &Path, mut num_threads: usize, args: &AppArgs) -> V
                 .map(|_| (job_rx.clone(), result_tx.clone()))
                 .for_each(|(job_rx, result_tx)| {
                     scope.spawn(move || {
-                        job_rx
-                            .into_iter()
-                            .for_each(|job| find_cargo_projects_task(job, result_tx.clone(), &args))
+                        let spinner_style = ProgressStyle::with_template("{wide_msg}")
+                            .expect("Invalid template syntax");
+                        let pb = progress_bar(multi_progress, spinner_style.clone());
+                        job_rx.into_iter().for_each(|job| {
+                            find_cargo_projects_task(job, &pb, result_tx.clone(), &args)
+                        });
+                        pb.finish_with_message("waiting...");
                     });
                 });
 
@@ -407,7 +418,6 @@ fn find_cargo_projects(path: &Path, mut num_threads: usize, args: &AppArgs) -> V
             result_rx
         }
         .into_iter()
-        .collect()
     })
 }
 
@@ -415,11 +425,20 @@ fn find_cargo_projects(path: &Path, mut num_threads: usize, args: &AppArgs) -> V
 /// Cargo.toml . Detected subdirectories should be queued as a new job in with the job_sender.
 ///
 /// This function is supposed to be called by the threadpool in find_cargo_projects
-fn find_cargo_projects_task(job: Job, results: Sender<ProjectDir>, args: &AppArgs) {
+fn find_cargo_projects_task(
+    job: Job,
+    pb: &ProgressBar,
+    results: Sender<ProjectDir>,
+    args: &AppArgs,
+) {
     if let Some(0) = job.depth {
         return;
     }
     let mut has_target = false;
+
+    if args.verbose {
+        pb.set_message(format!("looking at: {}", job.path.display()));
+    }
 
     let read_dir = match job.path.read_dir() {
         Ok(it) => it,
@@ -457,6 +476,9 @@ fn find_cargo_projects_task(job: Job, results: Sender<ProjectDir>, args: &AppArg
     // If path contains a Cargo.toml, it is a project directory
     if has_cargo_toml {
         results.send(ProjectDir(job.path, has_target)).unwrap();
+    }
+    if args.verbose {
+        pb.set_message("waiting...");
     }
 }
 
