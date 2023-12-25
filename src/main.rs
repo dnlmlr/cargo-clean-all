@@ -10,6 +10,28 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+const SPINNER_TICK_STRS: &[&'static str] = &[
+    "[=---------]",
+    "[-=--------]",
+    "[--=-------]",
+    "[---=------]",
+    "[----=-----]",
+    "[-----=----]",
+    "[------=---]",
+    "[-------=--]",
+    "[--------=-]",
+    "[---------=]",
+    "[--------=-]",
+    "[-------=--]",
+    "[------=---]",
+    "[-----=----]",
+    "[----=-----]",
+    "[---=------]",
+    "[--=-------]",
+    "[-=--------]",
+    "[=---------]",
+];
+
 #[derive(Debug, Parser)]
 #[clap(author, version, about, bin_name = "cargo clean-all", long_about = None)]
 struct AppArgs {
@@ -139,7 +161,7 @@ fn main() {
 
     let spinner = ProgressBar::new_spinner()
         .with_message(format!("Scanning for projects in {}", args.root_dir))
-        .with_style(ProgressStyle::default_spinner());
+        .with_style(ProgressStyle::default_spinner().tick_strings(SPINNER_TICK_STRS));
 
     if !args.verbose {
         spinner.enable_steady_tick(Duration::from_millis(100));
@@ -154,9 +176,8 @@ fn main() {
     multi_progress.clear().unwrap();
     spinner.finish_and_clear();
 
-    let pb = ProgressBar::new(cargo_projects.len() as u64);
     println!("Computing size of target/ for project");
-    pb.set_style(
+    let pb = ProgressBar::new(cargo_projects.len() as u64).with_style(
         ProgressStyle::with_template("[{elapsed}] [{bar:.cyan/blue}] {pos}/{len}: {msg}")
             .expect("Invalid template syntax")
             .progress_chars("#>-"),
@@ -259,15 +280,6 @@ fn main() {
 
     println!("Starting cleanup...");
 
-    let clean_progress = ProgressBar::new(selected.len() as u64)
-        .with_message("Deleting target directories")
-        .with_style(
-            ProgressStyle::default_bar()
-                .template("{msg} [{bar:20}] {pos:>3}/{len:3}")
-                .unwrap()
-                .progress_chars("=> "),
-        );
-
     // Saves the executables in another folder before cleaning the target folder
     if args.executable {
         for project in selected.iter() {
@@ -331,14 +343,23 @@ fn main() {
         }
     }
 
+    let clean_progress = ProgressBar::new(selected.len() as u64).with_style(
+        ProgressStyle::with_template("[{elapsed}] [{bar:}] {pos}/{len}: {msg}")
+            .expect("Invalid template syntax")
+            .progress_chars("#>-"),
+    );
+
     let failed_cleanups = selected.iter().filter_map(|tgt| {
-        clean_progress.inc(1);
-        remove_dir_all::remove_dir_all(&tgt.project_path.join("target"))
+        clean_progress.set_message(format!("{}", tgt.project_path.display()));
+        let res = remove_dir_all::remove_dir_all(&tgt.project_path.join("target"))
             .err()
-            .map(|e| (tgt.clone(), e))
+            .map(|e| (tgt.clone(), e));
+        clean_progress.inc(1);
+        res
     });
 
-    clean_progress.finish();
+    clean_progress.finish_and_clear();
+    println!("");
 
     // The current leftover size calculation assumes that a failed deletion didn't delete anything.
     // This will not be true in most cases as a recursive deletion might delet stuff before failing.
@@ -350,7 +371,7 @@ fn main() {
     }
 
     println!(
-        "\nAll projects cleaned. Reclaimed {} of disk space",
+        "\nProjects cleaned. Reclaimed {} of disk space",
         bytefmt::format(will_free_size - leftover_size).bold()
     );
 }
