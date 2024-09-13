@@ -77,7 +77,7 @@ cargo clean-all -i --ignore ~/Downloads --ignore ~/Documents ~
 | Keep executables in an extra directory         | yes | no  |
 
 Note that `cargo-clean-recursive` uses the actual `cargo clean` command under the hood instead of 
-simply deleting the target directories. This gies makes the cleaning work exactly as intended by 
+simply deleting the target directories. This makes the cleaning work exactly as intended by 
 the installed version of cargo, which can certainly be desirable in some cases.
 
 ---
