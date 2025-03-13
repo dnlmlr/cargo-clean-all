@@ -102,6 +102,7 @@ Options:
       --ignore <IGNORE>    Directories that should be ignored by default, including subdirectories. This will still detect the projects in those directories, but mark them to not be cleaned. To actually skip scanning directories, use --skip instead. The directories can be specified as absolute paths or relative to the workdir
   -e, --keep-executable    Keeping compiled executables in release, debug and cross-compilation directories. Moves the executable to a new folder outside of target
       --skip <SKIP>        Directories that should be fully skipped during scanning, including subdirectories. This will speed up the scanning time by not doing any reads for the specified directories. The directories can be specified as absolute paths or relative to the workdir
+      --keep-empty-target  Keep the empty target dir and remove only the files and subdirectories inside instead of removing the directory itself
   -h, --help               Print help information
   -V, --version            Print version information
 ```

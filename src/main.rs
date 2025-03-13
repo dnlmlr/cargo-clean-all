@@ -111,6 +111,11 @@ struct AppArgs {
     /// 0 means no limit
     #[arg(long = "depth", default_value_t = 0)]
     depth: usize,
+
+    /// Keep the empty target dir and remove only the files and subdirectories inside instead of
+    /// removing the directory itself
+    #[arg(long = "keep-empty-target")]
+    keep_empty_target: bool,
 }
 
 /// Wrap the bytefmt::parse function to return the error as an owned String
@@ -351,7 +356,7 @@ fn main() {
 
     let failed_cleanups = selected.iter().filter_map(|tgt| {
         clean_progress.set_message(format!("{}", tgt.project_path.display()));
-        let res = remove_dir_all::remove_dir_all(&tgt.project_path.join("target"))
+        let res = remove_dir_all(&tgt.project_path.join("target"), args.keep_empty_target)
             .err()
             .map(|e| (tgt.clone(), e));
         clean_progress.inc(1);
@@ -374,6 +379,23 @@ fn main() {
         "\nProjects cleaned. Reclaimed {} of disk space",
         bytefmt::format(will_free_size - leftover_size).bold()
     );
+}
+
+fn remove_dir_all(path: &Path, keep_empty_dir: bool) -> std::io::Result<()> {
+    if !keep_empty_dir {
+        remove_dir_all::remove_dir_all(path)
+    } else {
+        for rd in path.read_dir()? {
+            let rd = rd?;
+            let md = rd.metadata()?;
+            if md.is_dir() {
+                remove_dir_all::remove_dir_all(&rd.path())?;
+            } else {
+                std::fs::remove_file(&rd.path())?;
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Job for the threaded project finder. First the path to be searched, second the sender to create
