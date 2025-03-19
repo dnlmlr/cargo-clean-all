@@ -12,14 +12,14 @@ keywords = ["cargo-plugins", "cargo-clean", "cargo", "clean", "recursive"]
 edition = "2021"
 
 [dependencies]
-chrono = "0.4.31"
+chrono = "0.4.40"
 bytefmt = "0.1.7"
-clap = { version = "4.4.7", features = ["derive"] }
-crossbeam-channel = "0.5.8"
+clap = { version = "4.5.32", features = ["derive"] }
+crossbeam-channel = "0.5.14"
 num_cpus = "1.16.0"
-remove_dir_all = { version = "0.8.2", features = ["parallel"] }
+remove_dir_all = { version = "1.0.0", features = ["parallel"] }
 dialoguer = "0.11.0"
-colored = "2.0.4"
-indicatif = "0.17.7"
-ctrlc = "3.4.1"
-is_executable = "1.0.1"
+colored = "3.0.0"
+indicatif = "0.17.11"
+ctrlc = "3.4.5"
+is_executable = "1.0.4"
