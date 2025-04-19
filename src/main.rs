@@ -56,7 +56,7 @@ struct AppArgs {
     keep_size: u64,
 
     /// Ignore projects that have been compiled in the last [DAYS] days. The last compilation time
-    /// is infered by the last modified time of the contents of target directory.
+    /// is inferred by the last modified time of the contents of target directory.
     #[arg(
         short = 'd',
         long = "keep-days",
@@ -65,7 +65,7 @@ struct AppArgs {
     )]
     keep_last_modified: u32,
 
-    /// Just collect the cleanable projects and list the freeable space, but don't delete anything
+    /// Just collect the cleanable projects and list the reclaimable space, but don't delete anything
     #[arg(long = "dry-run")]
     dry_run: bool,
 
