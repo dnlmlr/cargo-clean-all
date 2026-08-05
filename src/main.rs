@@ -4,6 +4,7 @@ use crossbeam_channel::{SendError, Sender};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use is_executable::is_executable;
 use std::{
+    collections::HashSet,
     fmt::Display,
     path::{Path, PathBuf},
     thread,
@@ -286,10 +287,10 @@ fn main() {
     println!("Starting cleanup...");
 
     // Saves the executables in another folder before cleaning the target folder
-    if args.executable {
+    let skip_paths = if args.executable {
+        let mut skip_paths = Vec::new();
         for project in selected.iter() {
             let project_target_path = &project.project_path.join("target");
-            let project_executables_path = project.project_path.join("executables");
 
             let target_rd = match project_target_path.read_dir() {
                 Ok(it) => it,
@@ -317,36 +318,16 @@ fn main() {
 
                 let files = files
                     .filter_map(|it| it.ok())
-                    .filter_map(|it| it.file_type().is_ok_and(|t| t.is_file()).then(|| it.path()));
+                    .filter_map(|it| it.file_type().is_ok_and(|t| t.is_file()).then(|| it.path()))
+                    .filter(|file| is_executable(file));
 
-                for exe_file_path in files.filter(|file| is_executable(file)) {
-                    let new_exe_file_path = project_executables_path
-                        .join(target_subdir.file_name().expect("Path Error"))
-                        .join(exe_file_path.file_name().expect("Path Error"));
-
-                    if let Err(e) =
-                        std::fs::create_dir_all(new_exe_file_path.parent().expect("Path Error"))
-                    {
-                        eprintln!(
-                            "Error createing executable dir: '{}'  {}",
-                            new_exe_file_path.parent().expect("Path Error").display(),
-                            e
-                        );
-                        continue;
-                    }
-
-                    if let Err(e) = std::fs::rename(exe_file_path, &new_exe_file_path) {
-                        eprintln!(
-                            "Error moving executable: '{}'  {}",
-                            new_exe_file_path.display(),
-                            e
-                        );
-                        continue;
-                    }
-                }
+                skip_paths.extend(files);
             }
         }
-    }
+        skip_paths.into_iter().collect()
+    } else {
+        HashSet::new()
+    };
 
     let clean_progress = ProgressBar::new(selected.len() as u64).with_style(
         ProgressStyle::with_template("[{elapsed}] [{bar:}] {pos}/{len}: {msg}")
@@ -356,9 +337,13 @@ fn main() {
 
     let failed_cleanups = selected.iter().filter_map(|tgt| {
         clean_progress.set_message(format!("{}", tgt.project_path.display()));
-        let res = remove_dir_all(&tgt.project_path.join("target"), args.keep_empty_target)
-            .err()
-            .map(|e| (tgt.clone(), e));
+        let res = remove_dir_all(
+            &tgt.project_path.join("target"),
+            args.keep_empty_target,
+            &skip_paths,
+        )
+        .err()
+        .map(|e| (tgt.clone(), e));
         clean_progress.inc(1);
         res
     });
@@ -381,7 +366,42 @@ fn main() {
     );
 }
 
-fn remove_dir_all(path: &Path, keep_empty_dir: bool) -> std::io::Result<()> {
+fn remove_dir_all(
+    path: &Path,
+    keep_empty_dir: bool,
+    skip_paths: &HashSet<PathBuf>,
+) -> std::io::Result<()> {
+    fn remove_but_skip_some(skip_paths: &HashSet<PathBuf>, path: &Path) -> std::io::Result<bool> {
+        let mut should_remove_parent = true;
+        for rd in path.read_dir()? {
+            let rd = rd?;
+            let md = rd.metadata()?;
+            if md.is_dir() {
+                let should_remove = remove_but_skip_some(skip_paths, &rd.path())?;
+                if should_remove {
+                    std::fs::remove_dir(&rd.path())?;
+                } else {
+                    should_remove_parent = false;
+                }
+            } else {
+                if skip_paths.contains(&rd.path()) {
+                    should_remove_parent = false;
+                } else {
+                    std::fs::remove_file(&rd.path())?;
+                }
+            }
+        }
+        Ok(should_remove_parent)
+    }
+
+    if !skip_paths.is_empty() {
+        let remove_dir = remove_but_skip_some(skip_paths, path)?;
+        if remove_dir && !keep_empty_dir {
+            std::fs::remove_dir(path)?;
+        }
+        return Ok(());
+    }
+
     if !keep_empty_dir {
         remove_dir_all::remove_dir_all(path)
     } else {
