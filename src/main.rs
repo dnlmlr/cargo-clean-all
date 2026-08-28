@@ -223,6 +223,11 @@ fn main() {
         })
         .collect::<Vec<_>>();
 
+    if (args.interactive && projects.is_empty()) || preselected_projects.is_empty() {
+        println!("Nothing to clean.");
+        return;
+    }
+
     if args.interactive {
         let Ok(Some(prompt)) = dialoguer::MultiSelect::new()
             .items(&projects)
