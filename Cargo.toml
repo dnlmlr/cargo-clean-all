@@ -9,17 +9,17 @@ readme = "README.md"
 description = "Recursively clean all cargo projects in a given directory that match the specified criteria"
 categories = ["development-tools::cargo-plugins", "command-line-utilities"]
 keywords = ["cargo-plugins", "cargo-clean", "cargo", "clean", "recursive"]
-edition = "2021"
+edition = "2024"
 
 [dependencies]
-chrono = "0.4.40"
+chrono = "0.4.45"
 bytefmt = "0.1.7"
-clap = { version = "4.5.37", features = ["derive"] }
-crossbeam-channel = "0.5.15"
-num_cpus = "1.16.0"
+clap = { version = "4.6.6", features = ["derive"] }
+crossbeam-channel = "0.5.16"
+num_cpus = "1.17.0"
 remove_dir_all = { version = "1.0.0", features = ["parallel"] }
-dialoguer = "0.11.0"
-colored = "3.0.0"
-indicatif = "0.17.11"
-ctrlc = "3.4.6"
-is_executable = "1.0.4"
+dialoguer = "0.12.0"
+colored = "3.1.1"
+indicatif = "0.18.6"
+ctrlc = "3.5.2"
+is_executable = "1.0.6"
