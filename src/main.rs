@@ -10,7 +10,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-const SPINNER_TICK_STRS: &[&'static str] = &[
+const SPINNER_TICK_STRS: &[&str] = &[
     "[=---------]",
     "[-=--------]",
     "[--=-------]",
@@ -283,16 +283,15 @@ fn main() {
     }
 
     // Confirm cleanup if --yes is not present in the args
-    if !args.yes {
-        if !dialoguer::Confirm::new()
+    if !args.yes
+        && !dialoguer::Confirm::new()
             .with_prompt("Clean the project directories shown above?")
             .wait_for_newline(true)
             .interact()
             .unwrap_or(false)
-        {
-            println!("Cleanup cancelled");
-            return;
-        }
+    {
+        println!("Cleanup cancelled");
+        return;
     }
 
     println!("Starting cleanup...");
@@ -384,7 +383,7 @@ fn main() {
     });
 
     clean_progress.finish_and_clear();
-    println!("");
+    println!();
 
     // The current leftover size calculation assumes that a failed deletion didn't delete anything.
     // This will not be true in most cases as a recursive deletion might delet stuff before failing.
@@ -448,9 +447,9 @@ fn remove_dir_all(path: &Path, keep_empty_dir: bool) -> std::io::Result<()> {
             let rd = rd?;
             let md = rd.metadata()?;
             if md.is_dir() {
-                remove_dir_all::remove_dir_all(&rd.path())?;
+                remove_dir_all::remove_dir_all(rd.path())?;
             } else {
-                std::fs::remove_file(&rd.path())?;
+                std::fs::remove_file(rd.path())?;
             }
         }
         Ok(())
@@ -504,7 +503,7 @@ fn find_cargo_projects(
     if num_threads == 0 {
         num_threads = num_cpus::get();
     }
-    let depth = (args.depth > 0).then(|| args.depth);
+    let depth = (args.depth > 0).then_some(args.depth);
 
     thread::scope(|scope| {
         {
@@ -519,7 +518,7 @@ fn find_cargo_projects(
                             .expect("Invalid template syntax");
                         let pb = progress_bar(multi_progress, spinner_style.clone());
                         job_rx.into_iter().for_each(|job| {
-                            find_cargo_projects_task(job, &pb, result_tx.clone(), &args)
+                            find_cargo_projects_task(job, &pb, result_tx.clone(), args)
                         });
                         pb.finish_with_message("waiting...");
                     });
@@ -614,7 +613,7 @@ struct ProjectTargetAnalysis {
 impl ProjectTargetAnalysis {
     /// Analyze a given project directories target directory
     pub fn analyze(path: &Path) -> Self {
-        let (size, last_modified) = Self::recursive_scan_target(&path.join("target"));
+        let (size, last_modified) = Self::recursive_scan_target(path.join("target"));
         Self {
             project_path: path.to_owned(),
             size,
