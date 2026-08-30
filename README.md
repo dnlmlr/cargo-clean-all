@@ -99,17 +99,19 @@ Arguments:
   [DIR]  The directory in which the projects will be searched [default: .]
 
 Options:
-  -y, --yes                Don't ask for confirmation; Just clean all detected projects that are not excluded by other constraints
-  -s, --keep-size <SIZE>   Ignore projects with a target dir size smaller than the specified value. The size can be specified using binary prefixes like "10MB" for 10_000_000 bytes, or "1KiB" for 1_024 bytes [default: 0]
-  -d, --keep-days <DAYS>   Ignore projects that have been compiled in the last [DAYS] days. The last compilation time is inferred by the last modified time of the contents of target directory [default: 0]
-      --dry-run            Just collect the cleanable projects and list the reclaimable space, but don't delete anything
-  -t, --threads <THREADS>  The number of threads to use for directory scanning. 0 automatically selects the number of threads [default: 0]
-  -v, --verbose            Show access errors that occur while scanning. By default those errors are hidden
-  -i, --interactive        Use the interactive project selection. This will show a selection of all cleanable projects with the possibility to manually select or deselect
-      --ignore <IGNORE>    Directories that should be ignored by default, including subdirectories. This will still detect the projects in those directories, but mark them to not be cleaned. To actually skip scanning directories, use --skip instead. The directories can be specified as absolute paths or relative to the workdir
-  -e, --keep-executable    Keeping compiled executables in release, debug and cross-compilation directories. Moves the executable to a new folder outside of target
-      --skip <SKIP>        Directories that should be fully skipped during scanning, including subdirectories. This will speed up the scanning time by not doing any reads for the specified directories. The directories can be specified as absolute paths or relative to the workdir
-      --keep-empty-target  Keep the empty target dir and remove only the files and subdirectories inside instead of removing the directory itself
-  -h, --help               Print help information
-  -V, --version            Print version information
+  -y, --yes                       Don't ask for confirmation; Just clean all detected projects that are not excluded by other constraints
+  -s, --keep-size <SIZE>          Ignore projects with a target dir size smaller than the specified value. The size can be specified using binary prefixes like "10MB" for 10_000_000 bytes, or "1KiB" for 1_024 bytes [default: 0]
+  -d, --keep-days <DAYS>          Ignore projects that have been compiled in the last [DAYS] days. The last compilation time is inferred by the last modified time of the contents of target directory [default: 0]
+      --dry-run                   Just collect the cleanable projects and list the reclaimable space, but don't delete anything
+  -t, --threads <THREADS>         The number of threads to use for directory scanning. 0 automatically selects the number of threads [default: 0]
+  -v, --verbose                   Show access errors that occur while scanning. By default those errors are hidden
+  -i, --interactive               Use the interactive project selection. This will show a selection of all cleanable projects with the possibility to manually select or deselect
+      --ignore <IGNORE>           Directories that should be ignored by default, including subdirectories. This will still detect the projects in those directories, but mark them to not be cleaned. To actually skip scanning directories, use --skip instead. The directories can be specified as absolute paths or relative to the workdir
+  -e, --keep-executable           Keeping compiled executables in release, debug and cross-compilation directories. Moves the executable to a new folder outside of target
+      --keep-executable-same-dir  Keeping compiled executables in release, debug and cross-compilation directories. This acts in the same way as `--keep-executable` but restores them to the same directory where they were before cleaning. So instead of getting moved to a separate new folder outside of target, the executables stay in the target directory
+      --skip <SKIP>               Directories that should be fully skipped during scanning, including subdirectories. This will speed up the scanning time by not doing any reads for the specified directories. The directories can be specified as absolute paths or relative to the workdir
+      --depth <DEPTH>             Maximum depth of subdirectories that should be scanned looking for the **`target/`**. This will speed up the scanning The option is for target/ dir, NOT for the project dir 0 means no limit [default: 0]
+      --keep-empty-target         Keep the empty target dir and remove only the files and subdirectories inside instead of removing the directory itself
+  -h, --help                      Print help
+  -V, --version                   Print version
 ```
