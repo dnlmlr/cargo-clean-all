@@ -100,6 +100,13 @@ struct AppArgs {
     #[arg(short = 'e', long = "keep-executable")]
     executable: bool,
 
+    /// Keeping compiled executables in release, debug and cross-compilation directories.
+    /// This acts in the same way as `--keep-executable` but restores them to the same directory
+    /// where they were before cleaning. So instead of getting moved to a separate new folder
+    /// outside of target, the executables stay in the target directory.
+    #[arg(long = "keep-executable-same-dir")]
+    executable_same_dir: bool,
+
     /// Directories that should be fully skipped during scanning, including subdirectories. This
     /// will speed up the scanning time by not doing any reads for the specified directories.
     /// The directories can be specified as absolute paths or relative to the workdir.
@@ -291,8 +298,13 @@ fn main() {
     println!("Starting cleanup...");
 
     // Saves the executables in another folder before cleaning the target folder
-    if args.executable {
+
+    let mut executables_to_move_back = Vec::new();
+
+    if args.executable || args.executable_same_dir {
         for project in selected.iter() {
+            let mut moved_executables = Vec::new();
+
             let project_target_path = &project.project_path.join("target");
             let project_executables_path = project.project_path.join("executables");
 
@@ -340,6 +352,8 @@ fn main() {
                         continue;
                     }
 
+                    moved_executables.push((new_exe_file_path.clone(), exe_file_path.clone()));
+
                     if let Err(e) = std::fs::rename(exe_file_path, &new_exe_file_path) {
                         eprintln!(
                             "Error moving executable: '{}'  {}",
@@ -350,6 +364,7 @@ fn main() {
                     }
                 }
             }
+            executables_to_move_back.push((project_executables_path, moved_executables));
         }
     }
 
@@ -378,6 +393,45 @@ fn main() {
         leftover_size += tgt.size;
         println!("Failed to clean {}", pretty_format_path(&tgt.project_path));
         println!("Error: {}", e);
+    }
+
+    // Restore executables to their original locations, if requested
+    if args.executable_same_dir {
+        for (project_executable_dir, moved_files) in executables_to_move_back {
+            for (new_path, orig_path) in &moved_files {
+                println!(
+                    "Move Back: {} -> {}",
+                    new_path.display(),
+                    orig_path.display()
+                );
+
+                if let Err(e) = std::fs::create_dir_all(orig_path.parent().expect("Path Error")) {
+                    eprintln!(
+                        "Error restoring target dir for executables: '{}'  {}",
+                        orig_path.parent().expect("Path Error").display(),
+                        e
+                    );
+                    continue;
+                }
+
+                if let Err(e) = std::fs::rename(new_path, orig_path) {
+                    eprintln!(
+                        "Error restoring executable: '{}'  {}",
+                        orig_path.display(),
+                        e
+                    );
+                    continue;
+                }
+            }
+            if let Err(e) = remove_dir_all::remove_dir_all(&project_executable_dir) {
+                eprintln!(
+                    "Error cleaning executable dir: '{}'  {}",
+                    project_executable_dir.display(),
+                    e
+                );
+                continue;
+            }
+        }
     }
 
     println!(
