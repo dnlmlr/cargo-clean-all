@@ -5,10 +5,14 @@ use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use is_executable::is_executable;
 use std::{
     fmt::Display,
+    io,
     path::{Path, PathBuf},
     thread,
     time::{Duration, SystemTime},
 };
+
+#[cfg(test)]
+mod tests;
 
 const SPINNER_TICK_STRS: &[&str] = &[
     "[=---------]",
@@ -79,7 +83,7 @@ struct AppArgs {
     )]
     number_of_threads: usize,
 
-    /// Show access errors that occur while scanning. By default those errors are hidden
+    /// Show access errors and read-only filesystem skips while scanning. Hidden by default
     #[arg(short = 'v', long = "verbose")]
     verbose: bool,
 
@@ -137,6 +141,52 @@ fn canonicalize_or_not(p: impl AsRef<Path>) -> PathBuf {
 
 fn starts_with_canonicalized(a: impl AsRef<Path>, b: impl AsRef<Path>) -> bool {
     canonicalize_or_not(a).starts_with(canonicalize_or_not(b))
+}
+
+/// Check mount flags, not file permissions: writable mode bits do not imply a writable filesystem.
+#[cfg(unix)]
+fn filesystem_is_read_only(path: &Path) -> io::Result<bool> {
+    use nix::sys::statvfs::{FsFlags, statvfs};
+
+    let stat = statvfs(path)?;
+    Ok(stat.flags().contains(FsFlags::ST_RDONLY))
+}
+
+#[cfg(not(unix))]
+fn filesystem_is_read_only(_path: &Path) -> io::Result<bool> {
+    // Preserve existing behavior on platforms without the Unix mount-flags check.
+    Ok(false)
+}
+
+fn should_skip_filesystem(
+    path: &Path,
+    read_only: io::Result<bool>,
+    pb: &ProgressBar,
+    verbose: bool,
+) -> bool {
+    match read_only {
+        Ok(false) => false,
+        Ok(true) => {
+            if verbose {
+                pb.suspend(|| {
+                    eprintln!("Skipping read-only filesystem: '{}'", path.display());
+                });
+            }
+            true
+        }
+        Err(e) => {
+            if verbose {
+                pb.suspend(|| {
+                    eprintln!(
+                        "Skipping directory: '{}'  Error checking filesystem: {}",
+                        path.display(),
+                        e
+                    );
+                });
+            }
+            true
+        }
+    }
 }
 
 fn main() {
@@ -291,6 +341,25 @@ fn main() {
             .unwrap_or(false)
     {
         println!("Cleanup cancelled");
+        return;
+    }
+
+    // Mounts may have changed while waiting for confirmation. Recheck before moving executables
+    // or deleting anything, and do not count skipped projects as reclaimed space.
+    let pb = ProgressBar::hidden();
+    let selected: Vec<_> = selected
+        .into_iter()
+        .filter(|project| {
+            [&project.project_path, &project.project_path.join("target")]
+                .into_iter()
+                .all(|path| {
+                    !should_skip_filesystem(path, filesystem_is_read_only(path), &pb, args.verbose)
+                })
+        })
+        .collect();
+    let will_free_size: u64 = selected.iter().map(|it| it.size).sum();
+    if selected.is_empty() {
+        println!("Nothing to clean.");
         return;
     }
 
@@ -518,7 +587,13 @@ fn find_cargo_projects(
                             .expect("Invalid template syntax");
                         let pb = progress_bar(multi_progress, spinner_style.clone());
                         job_rx.into_iter().for_each(|job| {
-                            find_cargo_projects_task(job, &pb, result_tx.clone(), args)
+                            find_cargo_projects_task(
+                                job,
+                                &pb,
+                                result_tx.clone(),
+                                args,
+                                filesystem_is_read_only,
+                            )
                         });
                         pb.finish_with_message("waiting...");
                     });
@@ -544,6 +619,7 @@ fn find_cargo_projects_task(
     pb: &ProgressBar,
     results: Sender<ProjectDir>,
     args: &AppArgs,
+    read_only_check: impl Fn(&Path) -> io::Result<bool>,
 ) {
     if let Some(0) = job.depth {
         return;
@@ -552,6 +628,10 @@ fn find_cargo_projects_task(
 
     if args.verbose {
         pb.set_message(format!("looking at: {}", job.path.display()));
+    }
+
+    if should_skip_filesystem(&job.path, read_only_check(&job.path), pb, args.verbose) {
+        return;
     }
 
     let read_dir = match job.path.read_dir() {
@@ -583,7 +663,10 @@ fn find_cargo_projects_task(
             // as there shouldn't be any target dirs in there. Even if there are valid target dirs,
             // they should probably not be deleted. See issue #2 (https://github.com/dnlmlr/cargo-clean-all/issues/2)
             ".git" | ".cargo" => (),
-            "target" if has_cargo_toml => has_target = true,
+            // target/ can be a separate mount, and is not otherwise scanned by the finder.
+            "target" if has_cargo_toml => {
+                has_target = !should_skip_filesystem(&it, read_only_check(&it), pb, args.verbose);
+            }
             // For directories queue a new job to search it with the threadpool
             _ => job.explore_recursive(it.to_path_buf()).unwrap(),
         }
