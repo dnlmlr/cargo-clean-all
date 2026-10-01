@@ -22,6 +22,13 @@ an interactive selection, and/or CLI filters. The CLI filters can exclude projec
 compiled in the last X days, have a target directory that is smaller than X, or are specifically
 ignored.
 
+On Unix systems (including macOS and Linux), directories on read-only filesystems, such as
+mounted container images, are automatically skipped along with their subdirectories. A project's
+`target/` filesystem is checked separately in case it is a different mount. These projects are
+excluded from selection and reclaimable-space estimates, including in `--dry-run` mode.
+Directories whose filesystem flags cannot be read are also skipped. Use `--verbose` to see why.
+Filesystem flags are checked again before cleanup in case mounts changed during confirmation.
+
 **The actual cleaning consists of simply deleting the target directories from the detected projects,
 which seems to be what `cargo clean` does by default**.
 
@@ -104,7 +111,7 @@ Options:
   -d, --keep-days <DAYS>          Ignore projects that have been compiled in the last [DAYS] days. The last compilation time is inferred by the last modified time of the contents of target directory [default: 0]
       --dry-run                   Just collect the cleanable projects and list the reclaimable space, but don't delete anything
   -t, --threads <THREADS>         The number of threads to use for directory scanning. 0 automatically selects the number of threads [default: 0]
-  -v, --verbose                   Show access errors that occur while scanning. By default those errors are hidden
+  -v, --verbose                   Show access errors and read-only filesystem skips while scanning. Hidden by default
   -i, --interactive               Use the interactive project selection. This will show a selection of all cleanable projects with the possibility to manually select or deselect
       --ignore <IGNORE>           Directories that should be ignored by default, including subdirectories. This will still detect the projects in those directories, but mark them to not be cleaned. To actually skip scanning directories, use --skip instead. The directories can be specified as absolute paths or relative to the workdir
   -e, --keep-executable           Keeping compiled executables in release, debug and cross-compilation directories. Moves the executable to a new folder outside of target
