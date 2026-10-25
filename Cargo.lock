@@ -137,8 +137,10 @@ dependencies = [
  "dialoguer",
  "indicatif",
  "is_executable",
+ "nix 0.31.3",
  "num_cpus",
  "remove_dir_all",
+ "tempfile",
 ]
 
 [[package]]
