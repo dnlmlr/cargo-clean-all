@@ -189,6 +189,44 @@ fn should_skip_filesystem(
     }
 }
 
+fn total_size(projects: &[ProjectTargetAnalysis]) -> u64 {
+    projects.iter().map(|it| it.size).sum()
+}
+
+fn valid_entries(rd: std::fs::ReadDir) -> impl Iterator<Item = std::fs::DirEntry> {
+    rd.filter_map(|it| it.ok())
+}
+
+fn is_dir_entry(entry: &std::fs::DirEntry) -> bool {
+    entry.file_type().is_ok_and(|t| t.is_dir())
+}
+
+fn is_file_entry(entry: &std::fs::DirEntry) -> bool {
+    entry.file_type().is_ok_and(|t| t.is_file())
+}
+
+fn styled_template(template: &str) -> ProgressStyle {
+    ProgressStyle::with_template(template).expect("Invalid template syntax")
+}
+
+fn new_progress_bar(len: u64, template: &str) -> ProgressBar {
+    ProgressBar::new(len).with_style(styled_template(template).progress_chars("#>-"))
+}
+
+fn report_error(action: &str, path: &Path, e: impl Display) {
+    eprintln!("Error {}: '{}'  {}", action, path.display(), e);
+}
+
+fn create_dir_all_or_warn(dir: &Path, action: &str) -> bool {
+    match std::fs::create_dir_all(dir) {
+        Ok(()) => true,
+        Err(e) => {
+            report_error(action, dir, e);
+            false
+        }
+    }
+}
+
 fn main() {
     // If the program is interrupted while in a dialog the cursor stays hidden. This makes sure
     // that the cursor is shown when interrupting the program
@@ -239,10 +277,9 @@ fn main() {
     spinner.finish_and_clear();
 
     println!("Computing size of target/ for project");
-    let pb = ProgressBar::new(cargo_projects.len() as u64).with_style(
-        ProgressStyle::with_template("[{elapsed}] [{bar:.cyan/blue}] {pos}/{len}: {msg}")
-            .expect("Invalid template syntax")
-            .progress_chars("#>-"),
+    let pb = new_progress_bar(
+        cargo_projects.len() as u64,
+        "[{elapsed}] [{bar:.cyan/blue}] {pos}/{len}: {msg}",
     );
 
     let mut projects: Vec<_> = cargo_projects
@@ -310,7 +347,7 @@ fn main() {
         .into_iter()
         .partition(|proj| proj.selected_for_cleanup);
 
-    let will_free_size: u64 = selected.iter().map(|it| it.size).sum();
+    let will_free_size: u64 = total_size(&selected);
     let ignored_free_size: u64 = ignored.iter().map(|it| it.size).sum();
 
     println!("Ignoring the following project directories:");
@@ -357,7 +394,7 @@ fn main() {
                 })
         })
         .collect();
-    let will_free_size: u64 = selected.iter().map(|it| it.size).sum();
+    let will_free_size: u64 = total_size(&selected);
     if selected.is_empty() {
         println!("Nothing to clean.");
         return;
@@ -385,9 +422,9 @@ fn main() {
                 }
             };
 
-            let target_rd = target_rd
-                .filter_map(|it| it.ok())
-                .filter_map(|it| it.file_type().is_ok_and(|t| t.is_dir()).then(|| it.path()));
+            let target_rd = valid_entries(target_rd)
+                .filter(is_dir_entry)
+                .map(|it| it.path());
 
             for target_subdir in target_rd {
                 let files = match target_subdir.read_dir() {
@@ -400,34 +437,26 @@ fn main() {
                     }
                 };
 
-                let files = files
-                    .filter_map(|it| it.ok())
-                    .filter_map(|it| it.file_type().is_ok_and(|t| t.is_file()).then(|| it.path()));
+                let files = valid_entries(files)
+                    .filter(is_file_entry)
+                    .map(|it| it.path());
 
                 for exe_file_path in files.filter(|file| is_executable(file)) {
                     let new_exe_file_path = project_executables_path
                         .join(target_subdir.file_name().expect("Path Error"))
                         .join(exe_file_path.file_name().expect("Path Error"));
 
-                    if let Err(e) =
-                        std::fs::create_dir_all(new_exe_file_path.parent().expect("Path Error"))
-                    {
-                        eprintln!(
-                            "Error createing executable dir: '{}'  {}",
-                            new_exe_file_path.parent().expect("Path Error").display(),
-                            e
-                        );
+                    if !create_dir_all_or_warn(
+                        new_exe_file_path.parent().expect("Path Error"),
+                        "creating executable dir",
+                    ) {
                         continue;
                     }
 
                     moved_executables.push((new_exe_file_path.clone(), exe_file_path.clone()));
 
                     if let Err(e) = std::fs::rename(exe_file_path, &new_exe_file_path) {
-                        eprintln!(
-                            "Error moving executable: '{}'  {}",
-                            new_exe_file_path.display(),
-                            e
-                        );
+                        report_error("moving executable", &new_exe_file_path, e);
                         continue;
                     }
                 }
@@ -436,10 +465,9 @@ fn main() {
         }
     }
 
-    let clean_progress = ProgressBar::new(selected.len() as u64).with_style(
-        ProgressStyle::with_template("[{elapsed}] [{bar:}] {pos}/{len}: {msg}")
-            .expect("Invalid template syntax")
-            .progress_chars("#>-"),
+    let clean_progress = new_progress_bar(
+        selected.len() as u64,
+        "[{elapsed}] [{bar:}] {pos}/{len}: {msg}",
     );
 
     let failed_cleanups = selected.iter().filter_map(|tgt| {
@@ -473,30 +501,20 @@ fn main() {
                     orig_path.display()
                 );
 
-                if let Err(e) = std::fs::create_dir_all(orig_path.parent().expect("Path Error")) {
-                    eprintln!(
-                        "Error restoring target dir for executables: '{}'  {}",
-                        orig_path.parent().expect("Path Error").display(),
-                        e
-                    );
+                if !create_dir_all_or_warn(
+                    orig_path.parent().expect("Path Error"),
+                    "restoring target dir for executables",
+                ) {
                     continue;
                 }
 
                 if let Err(e) = std::fs::rename(new_path, orig_path) {
-                    eprintln!(
-                        "Error restoring executable: '{}'  {}",
-                        orig_path.display(),
-                        e
-                    );
+                    report_error("restoring executable", orig_path, e);
                     continue;
                 }
             }
             if let Err(e) = remove_dir_all::remove_dir_all(&project_executable_dir) {
-                eprintln!(
-                    "Error cleaning executable dir: '{}'  {}",
-                    project_executable_dir.display(),
-                    e
-                );
+                report_error("cleaning executable dir", &project_executable_dir, e);
                 continue;
             }
         }
@@ -583,8 +601,7 @@ fn find_cargo_projects(
                 .map(|_| (job_rx.clone(), result_tx.clone()))
                 .for_each(|(job_rx, result_tx)| {
                     scope.spawn(move || {
-                        let spinner_style = ProgressStyle::with_template("{wide_msg}")
-                            .expect("Invalid template syntax");
+                        let spinner_style = styled_template("{wide_msg}");
                         let pb = progress_bar(multi_progress, spinner_style.clone());
                         job_rx.into_iter().for_each(|job| {
                             find_cargo_projects_task(
@@ -644,9 +661,7 @@ fn find_cargo_projects_task(
             return;
         }
     };
-    let (dirs, files): (Vec<_>, Vec<_>) = read_dir
-        .filter_map(|it| it.ok())
-        .partition(|it| it.file_type().is_ok_and(|t| t.is_dir()));
+    let (dirs, files): (Vec<_>, Vec<_>) = valid_entries(read_dir).partition(is_dir_entry);
     let dirs = dirs.iter().map(|it| it.path());
     let has_cargo_toml = files
         .iter()
